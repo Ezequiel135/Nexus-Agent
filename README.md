@@ -1,649 +1,525 @@
-# NEXUS AGENT v1.0
+# NEXUS AGENT v2.0
 
-Agente de autonomia local para terminal, inspirado no fluxo de uso de Codex e Claude Code.
+<div align="center">
 
-Local terminal autonomy agent inspired by Codex and Claude Code workflows.
+**Agente de Autonomia Local para Terminal**
 
-Criado por `Ezequiel 135`.
+Inspirado no fluxo de trabalho do Codex e Claude Code — mas com cérebro de verdade.
+
+[![GitHub](https://img.shields.io/badge/GitHub-Ezequiel135-blue?logo=github)](https://github.com/Ezequiel135/Nexus-Agent)
+[![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python)](https://www.python.org/)
+[![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
+
+**Criado por Ezequiel 135**
+
+</div>
 
 ---
 
-## PT-BR
+## 📑 Índice
 
-### Visão Geral
+- [O que é](#o-que-é)
+- [Por que usar](#por-que-usar)
+- [Recursos](#recursos)
+- [Arquitetura](#arquitetura)
+- [Instalação](#instalação)
+- [Uso](#uso)
+- [Ferramentas](#ferramentas)
+- [Modo Missão](#modo-missão)
+- [Segurança](#segurança)
+- [Comandos](#comandos)
+- [Estrutura](#estrutura)
+- [Troubleshooting](#troubleshooting)
 
-`NEXUS AGENT` roda no terminal, conversa com o usuário, usa ferramentas locais, executa tarefas em loop e mantém uma interface visual para mostrar o que está acontecendo em tempo real.
+---
 
-Ele combina:
+## O que é
 
-- interface de terminal com visual profissional
-- modo interativo estilo REPL
-- integração com APIs de IA via LiteLLM
-- ferramentas locais para shell, arquivos, mouse, teclado e tela
-- autenticação por senha para entrar em modo autônomo
-- logs, histórico, memória local e proteções contra comandos destrutivos
+O **NEXUS AGENT** é um agente de autonomia local que roda no terminal, conversa com você em linguagem natural e executa tarefas reais no seu computador — com shell, arquivos, mouse, teclado e visão de tela.
 
-O agente de IA do terminal já foi ajustado para entender que, quando a tarefa mencionar tela, botão, janela, clicar, cursor, navegador, cor ou digitar no PC, ele deve usar as tools locais de visão e periférico em vez de responder apenas com texto.
+Diferente de assistentes que só respondem, o Nexus **planeja, age e reporta**. Ele transforma objetivos complexos ("organiza minha pasta de downloads") em planos detalhados e executa cada passo autonomamente.
 
-Ele também possui memória local persistente. O que o usuário manda pode ser salvo em disco para reutilização futura pelo agente.
+---
 
-### Interface
+## Por que usar
 
-O NEXUS AGENT pode rodar de dois jeitos:
+| 💬 Assistentes comuns | 🤖 Nexus Agent |
+|----------------------|----------------|
+| Respondem perguntas | Executam tarefas reais |
+| Dependem de prompts perfeitos | Decompõem objetivos automaticamente |
+| Sem memória persistente | Memorizam preferências e contexto |
+| Sem segurança embutida | Luz Verde em tempo real (🟢🟡🔴) |
+| Apenas texto | Shell + Arquivos + Mouse + Teclado + OCR |
 
-#### 1. Modo UI
+---
 
-Modo com interface visual em `Textual + Rich`.
+## Recursos
 
-Na tela, o usuário vê:
+### 🧠 Cérebro de Verdade — Planner/Executor Real
+O agente não é mais um mock. Ele gera um plano JSON com subtarefas, decidi qual ferramenta usar em cada passo e executa em loop até terminar.
 
-- cabeçalho fixo com o nome `NEXUS AGENT`
-- luz de segurança com estado real
-- área principal de conversa
-- painel lateral com logs das ações
-- barra inferior com modelo, latência e estado do modo autônomo
+### 🛠️ Tool Registry Dinâmico
+Sistema de ferramentas plugável com auto-registro. Fácil estender e integrar com LangChain, CrewAI ou OpenAI Tools.
 
-#### 2. Modo Plain
+### 🟢 Luz Verde Real
+Sandbox de segurança integrado em cada comando:
+- 🟢 **Verde** — seguro (diretórios permitidos: `~`, `~/.nexus`, `/tmp`, cwd)
+- 🟡 **Amarelo** — atenção (ex: `rm -r`, `dd`, `mkfs`)
+- 🔴 **Vermelha** — bloqueado (ex: `rm -rf /`, `shutdown`, `mkfs`)
 
-Modo mais parecido com Codex / Claude Code no terminal puro.
+### 🎯 Modo Missão
+Para tarefas com +4 palavras ou palavras-chave ("organizar", "criar", "instalar"), o agente ativa automaticamente o Modo Missão:
+1. Mostra o plano completo antes de executar
+2. Executa cada passo com logs
+3. Salva a missão na memória local
 
-Ideal para:
+### 📡 Installer Viral
+Instalador multiplataforma que funciona de primeira:
+- Detecção automática de OS (Linux/macOS)
+- Fallback Python: `python3` → `python` → `python3.10-12`
+- Cores no terminal, barra de progresso
+- PATH auto-configurado em `~/.bashrc` e `~/.zshrc`
+- Suporte a instalação global (`NEXUS_INSTALL_GLOBAL=1`)
 
-- terminal simples
-- ambiente sem suporte completo a TUI
-- PowerShell, Windows Terminal, SSH ou shell remoto
+---
 
-Prompt:
+## Arquitetura
 
-```text
-nexus>
+```
+NEXUS AGENT v2.0
+├── core/
+│   ├── llm.py           # LiteLLMBridge + PlannerExecutor
+│   ├── actions.py       # AcoesAgente (ToolRegistry)
+│   ├── tool_registry.py # Sistema dinâmico de ferramentas
+│   ├── safeguards.py    # Luz Verde (segurança)
+│   ├── memory.py        # Memória local persistente
+│   ├── config.py        # Configuração e caminhos
+│   ├── state.py         # Monitor de atividade
+│   └── logging_utils.py # Logs estruturados
+├── ui/
+│   ├── app.py           # Interface Textual (modo UI)
+│   ├── plain_cli.py     # Terminal puro (modo Codex)
+│   └── setup_cli.py     # Setup via CLI
+├── pc_remote_agent/     # Automação local (pyautogui + OCR)
+├── main.py              # Entry point do comando `nexus`
+├── install.sh           # Instalador Linux/macOS
+└── requirements.txt     # Dependências Python
 ```
 
-Comandos internos:
+### Fluxo de Execução
 
-- `/help`
-- `/init`
-- `/onboarding`
-- `/status`
-- `/tools`
-- `/memory`
-- `/remember texto`
-- `/forget-all`
-- `/blocked`
-- `/clear`
-- `/exit`
-
-### Mockup ASCII da Interface
-
-```text
-+--------------------------------------------------------------------------------------+
-| NEXUS AGENT v1.0 - STATUS: [OPERACIONAL]                             ● thinking/acting |
-| Criado por Ezequiel 135                                                              |
-+--------------------------------------------------------------------------------------+
-| CHAT / OBJETIVO                                              | ACTION & LOG PANEL     |
-|--------------------------------------------------------------|------------------------|
-| Você: Organize minha pasta de downloads                      | [13:45:02] PROMPT ...  |
-| NEXUS: Vou separar por tipo, mover arquivos e gerar resumo.  | [13:45:03] EXECUTANDO  |
-| NEXUS: Lendo diretório atual...                              | [13:45:04] ARQUIVO ... |
-| NEXUS: Aplicando reorganização...                            | [13:45:06] PERIFERICO  |
-|                                                              | [13:45:08] RESULTADO   |
-| nexus>                                                       |                        |
-+--------------------------------------------------------------------------------------+
-| Modelo: gpt-4o | Latência: 842 ms | CPU/RAM | AUTONOMOUS_MODE=ON | Ezequiel 135       |
-+--------------------------------------------------------------------------------------+
+```
+Usuário → Objetivo → PlannerExecutor → Plano JSON
+         ↓
+    Loop por passo:
+      - Verifica Luz Verde
+      - Dispara ferramenta via ToolRegistry
+      - Log + Memória
+         ↓
+    Missão concluída → Resumo no chat
 ```
 
-### Estados Visuais do Agente
+---
 
-- `amarelo`: pensando
-- `verde pulsando`: executando ação
-- `vermelho`: erro
+## Instalação
 
-Logs também vão para:
+### Requisitos
 
-```text
-~/.nexus/nexus.log
-```
+- **Python 3.10+**
+- **Git** (para clone do repositório)
+- **Linux/macOS** (Windows via WSL ou PowerShell script)
 
-### O Que o Agente Faz
-
-- conversa com o usuário em linguagem natural
-- recebe objetivos longos e executa subtarefas
-- lê, escreve, move e apaga arquivos
-- executa comandos no shell
-- usa mouse, teclado e leitura de tela
-- mantém histórico curto da conversa
-- mantém memória local persistente
-- permite setup inicial de API e modelo
-- funciona em Linux e foi preparado para Windows Terminal
-
-### Ferramentas Internas
-
-- `executar_comando(comando)`
-- `gerenciar_arquivos(acao, path, content=None, target_path=None)`
-- `controle_periferico(acao, x=None, y=None, texto=None)`
-- `memoria_local(acao, texto=None, consulta=None)`
-- `verificar_pixel(x, y)`
-
-### Estrutura do Projeto
-
-- `core/`: configuração, estado, safeguards, logs, memória e ponte LiteLLM
-- `ui/`: interface visual e modo plain
-- `main.py`: entrada principal do comando `nexus`
-- `install.sh`: instalador Linux
-- `install.ps1`: instalador PowerShell / Windows Terminal
-- `requirements.txt`: dependências Python
-- `pc_remote_agent/`: runtime de automação local
-
-### Primeiro Boot
-
-Se `~/.nexus/config.json` não existir, o NEXUS AGENT entra em modo de configuração e pede:
-
-1. `Provider`
-2. `API Key`
-3. `Model Name`
-4. `Senha mestra do NEXUS AGENT`
-
-Depois disso, ele salva:
-
-- `~/.nexus/config.json`
-- `~/.nexus/history.json`
-- `~/.nexus/activity.json`
-- `~/.nexus/memory.json`
-
-### Segurança
-
-O agente bloqueia comandos que possam:
-
-- danificar BIOS ou EFI
-- formatar disco
-- alterar boot
-- apagar a raiz do sistema
-- corromper o sistema operacional
-- desligar ou reiniciar a máquina de forma destrutiva
-
-Exemplos bloqueados:
-
-- `rm -rf /`
-- `mkfs.ext4 /dev/sda1`
-- `fdisk /dev/sda`
-- `parted /dev/nvme0n1`
-- `dd if=image.iso of=/dev/sda`
-- `flashrom -p internal -w bios.bin`
-- `shutdown now`
-
-Ver lista:
+### Opção 1: Installer Viral (recomendado)
 
 ```bash
-nexus blocked
-```
-
-### Instalação no Linux
-
-Requisitos:
-
-```bash
-sudo apt-get update
-sudo apt-get install -y git python3-venv python3-pip python3-dev python3-tk scrot xdotool tesseract-ocr
-```
-
-Instalação local:
-
-```bash
-cd "NEXUS AGENT"
-chmod +x install.sh nexus
-./install.sh
-nexus start
-```
-
-O instalador já tenta neutralizar conflito com launchers antigos chamados `nexus`. Se existir um `nexus` legado em `/usr/local/bin`, o processo tenta mover esse launcher antigo para backup e prioriza `~/.local/bin/nexus`.
-
-Instalação via GitHub:
-
-```bash
-export NEXUS_REPO_URL="https://github.com/Ezequiel135/Nexus-Agent.git"
-curl -sSL https://raw.githubusercontent.com/Ezequiel135/Nexus-Agent/main/install.sh | bash
-```
-
-Baixar com `git clone`:
-
-```bash
-git clone https://github.com/Ezequiel135/Nexus-Agent.git
-cd "Nexus-Agent"
-chmod +x install.sh nexus
-./install.sh
-```
-
-Baixar como ZIP:
-
-1. Abra `https://github.com/Ezequiel135/Nexus-Agent`
-2. Clique em `Code`
-3. Clique em `Download ZIP`
-4. Extraia a pasta
-5. Entre na pasta extraída e rode:
-
-```bash
-chmod +x install.sh nexus
-./install.sh
-```
-
-### Instalação no Windows Terminal / PowerShell
-
-Requisitos:
-
-- Python 3.10+
-- Git
-- PowerShell ou Windows Terminal
-
-Passo a passo:
-
-```powershell
-Set-ExecutionPolicy -Scope Process Bypass
-.\install.ps1
-nexus start --plain
-```
-
-Baixar do GitHub no Windows:
-
-```powershell
+# Clone o repositório
 git clone https://github.com/Ezequiel135/Nexus-Agent.git
 cd Nexus-Agent
-Set-ExecutionPolicy -Scope Process Bypass
-.\install.ps1
-```
 
-### Comandos Principais
-
-```bash
-nexus setup
-nexus onboarding
-nexus blocked
-nexus doctor
-nexus start
-nexus start --plain
-nexus start --task "Organize minha pasta de downloads e crie um resumo"
-nexus update
-nexus uninstall
-```
-
-### Arquivos do Usuário
-
-- `~/.nexus/config.json`: provider, API e modelo
-- `~/.nexus/nexus.log`: histórico de ações
-- `~/.nexus/history.json`: histórico recente da conversa
-- `~/.nexus/activity.json`: estado atual do agente
-- `~/.nexus/memory.json`: memória local persistente
-- `~/.nexus/repo.txt`: origem usada pelo `update`
-
-### Troubleshooting
-
-#### 1. `Dependencias da interface nao instaladas`
-
-Causa:
-
-- `textual` ou outra lib do `requirements.txt` não está instalada
-
-Solução:
-
-```bash
-pip install -r requirements.txt
-```
-
-Ou rode o agente em modo plain:
-
-```bash
-nexus start --plain
-```
-
-#### 2. `ERRO DE COMUNICACAO: VERIFIQUE SUA COTA OU CHAVE DE API`
-
-Causa:
-
-- chave inválida
-- cota encerrada
-- modelo incorreto
-- provider mal configurado
-
-Solução:
-
-1. Rode `nexus setup`
-2. confira provider, API key e model name
-3. teste novamente
-
-#### 3. Automação gráfica não funciona no Linux
-
-Causa:
-
-- terminal sem acesso ao display
-- `DISPLAY` incorreto
-- sessão remota sem permissões
-
-Solução:
-
-- use `nexus doctor`
-- prefira `nexus start --plain` em ambiente remoto
-- confirme acesso correto ao display gráfico
-
-#### 4. `nexus` não é reconhecido como comando
-
-Causa:
-
-- terminal ainda não recarregou o `PATH`
-- instalação incompleta
-
-Solução:
-
-- abra um novo terminal
-- ou rode direto:
-
-```bash
-python3 main.py start --plain
-```
-
-#### 5. `nexus` abre outro programa antigo
-
-Causa:
-
-- já existe outro script chamado `nexus` no sistema
-- o `PATH` está apontando para um launcher antigo
-
-Solução:
-
-```bash
-which nexus
-type -a nexus
-```
-
-Se necessário, reinstale o projeto para gravar o launcher correto em `~/.local/bin/nexus`:
-
-```bash
+# Execute o instalador
+chmod +x install.sh nexus
 ./install.sh
+
+# Abra um NOVO terminal e rode:
+nexus start
 ```
 
-Depois abra um novo terminal e teste:
+**One-liner via curl:**
 
 ```bash
-nexus doctor
-nexus start --plain
+curl -fsSL https://raw.githubusercontent.com/Ezequiel135/Nexus-Agent/main/install.sh | bash
+nexus start
 ```
 
-#### 6. PowerShell bloqueia o script `install.ps1`
+### Opção 2: Instalação Manual
 
-Causa:
+```bash
+# Clone
+git clone https://github.com/Ezequiel135/Nexus-Agent.git
+cd Nexus-Agent
 
-- política de execução restrita
+# Crie venv
+python3 -m venv .venv
+source .venv/bin/activate
 
-Solução:
+# Instale dependências
+pip install -r requirements.txt
+
+# Configure
+python main.py setup
+
+# Rode
+python main.py start
+```
+
+### Opção 3: Windows Terminal / PowerShell
 
 ```powershell
+# Clone
+git clone https://github.com/Ezequiel135/Nexus-Agent.git
+cd Nexus-Agent
+
+# Execute o instalador PowerShell
 Set-ExecutionPolicy -Scope Process Bypass
 .\install.ps1
+
+# Modo plain (recomendado no Windows)
+nexus start --plain
 ```
-
-#### 7. Como desinstalar
-
-Use:
-
-```bash
-nexus uninstall
-```
-
-Esse comando remove a instalação local em `~/.nexus` e o launcher do usuário em `~/.local/bin/nexus`.
 
 ---
 
-## English
+## Uso
 
-### Overview
+### Primeiro Acesso
 
-`NEXUS AGENT` is a local terminal autonomy agent inspired by Codex and Claude Code.
+Na primeira execução, o Nexus entra em **modo setup** e pede:
 
-It runs inside the terminal, talks to the user, uses local tools, executes tasks in loops, and keeps a visual interface showing what is happening in real time.
+1. **Provider** — OpenAI, Anthropic, Google, Ollama, Groq
+2. **API Key** — sua chave do provedor
+3. **Model Name** — ex: `gpt-4o-mini`, `claude-3-5-sonnet`, `llama3`
+4. **Senha Mestra** — protege o modo autônomo
 
-It combines:
+A configuração é salva em `~/.nexus/config.json`.
 
-- a professional terminal UI
-- a REPL-style plain mode
-- AI API integration through LiteLLM
-- local tools for shell, files, mouse, keyboard, and screen
-- password-based autonomous mode
-- logs, short-term history, local memory, and destructive-command safeguards
-
-The terminal AI has been adjusted to understand that whenever a task mentions screen, window, button, cursor, browser, color, clicking, or typing on the PC, it should use local vision and peripheral tools instead of replying only with text.
-
-### Interface Modes
-
-#### 1. UI Mode
-
-Full visual mode built with `Textual + Rich`.
-
-The screen shows:
-
-- a fixed `NEXUS AGENT` header
-- a real activity safety light
-- a main chat area
-- a side action/log panel
-- a bottom status bar with model, latency, and autonomy state
-
-#### 2. Plain Mode
-
-The closest mode to Codex / Claude Code in a pure terminal flow.
-
-Best for:
-
-- simple terminals
-- environments without full TUI support
-- PowerShell, Windows Terminal, SSH, or remote shells
-
-Prompt:
-
-```text
-nexus>
-```
-
-Built-in commands:
-
-- `/help`
-- `/init`
-- `/onboarding`
-- `/status`
-- `/tools`
-- `/memory`
-- `/remember text`
-- `/forget-all`
-- `/blocked`
-- `/clear`
-- `/exit`
-
-### Agent Visual States
-
-- `yellow`: thinking
-- `pulsing green`: acting
-- `red`: error
-
-Logs are also written to:
-
-```text
-~/.nexus/nexus.log
-```
-
-### Internal Tools
-
-- `executar_comando(comando)`
-- `gerenciar_arquivos(acao, path, content=None, target_path=None)`
-- `controle_periferico(acao, x=None, y=None, texto=None)`
-- `memoria_local(acao, texto=None, consulta=None)`
-- `verificar_pixel(x, y)`
-
-### First Boot
-
-If `~/.nexus/config.json` does not exist, NEXUS AGENT enters setup mode and asks for:
-
-1. `Provider`
-2. `API Key`
-3. `Model Name`
-4. `Master password`
-
-It then stores:
-
-- `~/.nexus/config.json`
-- `~/.nexus/history.json`
-- `~/.nexus/activity.json`
-- `~/.nexus/memory.json`
-
-### Linux Installation
-
-Requirements:
+### Iniciar
 
 ```bash
-sudo apt-get update
-sudo apt-get install -y git python3-venv python3-pip python3-dev python3-tk scrot xdotool tesseract-ocr
-```
-
-Local install:
-
-```bash
-cd "NEXUS AGENT"
-chmod +x install.sh nexus
-./install.sh
+# Modo UI completo (recomendado)
 nexus start
-```
 
-GitHub install:
-
-```bash
-export NEXUS_REPO_URL="https://github.com/Ezequiel135/Nexus-Agent.git"
-curl -sSL https://raw.githubusercontent.com/Ezequiel135/Nexus-Agent/main/install.sh | bash
-```
-
-### Windows Terminal / PowerShell Installation
-
-Requirements:
-
-- Python 3.10+
-- Git
-- PowerShell or Windows Terminal
-
-Steps:
-
-```powershell
-Set-ExecutionPolicy -Scope Process Bypass
-.\install.ps1
+# Modo terminal puro (estilo Codex/Claude Code)
 nexus start --plain
+
+# Com tarefa inicial
+nexus start --task "Organize minha pasta Downloads por tipo"
+
+# Após instalação, recarregue o terminal
+source ~/.bashrc
 ```
 
-### Main Commands
+### Dentro do Nexus
+
+**Modo UI:** digite objetivos em linguagem natural no campo de input.
+
+**Modo Plain:**
+```
+nexus> Organize meus arquivos baixados separando PDFs, imagens e documentos
+
+# O agente planeja e executa automaticamente
+[PLANO CONCLUIDO]
+  Passo 1: Ler diretório ~/Downloads...
+  Passo 2: Classificar arquivos...
+  Passo 3: Criar pastas...
+  Passo 4: Mover arquivos...
+  Passo 5: Gerar resumo...
+```
+
+### Comandos Internos (Modo Plain)
+
+| Comando | Descrição |
+|--------|-----------|
+| `/help` | Mostra ajuda |
+| `/init` / `/onboarding` | Tour guiado |
+| `/status` | Status do agente |
+| `/tools` | Lista ferramentas disponíveis |
+| `/memory` | Mostra memória local |
+| `/remember texto` | Salva memória manual |
+| `/forget-all` | Apaga toda memória |
+| `/blocked` | Comandos bloqueados |
+| `/clear` | Limpa tela |
+| `/exit` | Sai |
+
+---
+
+## Ferramentas
+
+Todas as ferramentas são **chamadas automaticamente** pelo LLM com base no contexto:
+
+| Ferramenta | Descrição | Parâmetros |
+|------------|-----------|------------|
+| `executar_comando` | Executa shell | `comando: str` |
+| `gerenciar_arquivos` | CRUD de arquivos | `acao: ler\|escrever\|listar\|mover\|deletar`, `path: str`, `content?, target_path?` |
+| `controle_periferico` | Mouse/teclado/OCR | `acao: clicar\|digitar\|mover_mouse\|screenshot\|posicao_cursor`, `x?, y?, texto?` |
+| `memoria_local` | Memória persistente | `acao: salvar\|buscar\|limpar`, `texto?, consulta?` |
+| `verificar_pixel` | Lê cor RGB da tela | `x: int`, `y: int` |
+
+### Exemplos de Uso
 
 ```bash
-nexus setup
-nexus onboarding
+# Shell
+nexus> ls -la ~/Downloads
+
+# Arquivos
+nexus> Crie um arquivo notes.txt com "comprar leite"
+
+# Memória
+nexus> Lembre que meu modelo favorito é gpt-4o
+
+# Mouse/Teclado
+nexus> Clique no botão Aceito na tela
+```
+
+---
+
+## Modo Missão
+
+Ativado automaticamente para objetivos complexos. O Nexus:
+
+1. **Planeja** — decompõe em subtarefas
+2. **Mostra** — exibe o plano completo antes de executar
+3. **Executa** — roda cada passo com verificação de segurança
+4. **Reporta** — log de cada ação e resumo final
+
+### Exemplo
+
+```
+Você: Organiza minha pasta downloads
+
+📋 PLANO:
+1. Ler diretório ~/Downloads
+2. Classificar arquivos por extensão
+3. Criar pastas: PDFs, Imagens, Documentos, etc.
+4. Mover arquivos para pastas correspondentes
+5. Gerar resumo das operações
+
+🚀 EXECUTANDO 5 PASSOS...
+[✓] PASSO 1/5: Ler diretório ~/Downloads...
+[✓] PASSO 2/5: Classificar 47 arquivos...
+[✓] PASSO 3/5: Criar 6 pastas...
+[✓] PASSO 4/5: Mover arquivos...
+[✓] PASSO 5/5: Gerar resumo...
+
+✅ Missão concluída — 47 arquivos organizados em 6 pastas
+```
+
+---
+
+## Segurança
+
+### Luz Verde em Tempo Real
+
+Cada comando é verificado antes de executar:
+
+🟢 **Verde** — Seguro. Executa imediatamente.
+🟡 **Amarelo** — Atenção. Pode alterar sistema (ex: `apt install`).
+🔴 **Vermelha** — Bloqueado. Risco de dano.
+
+### Comandos Bloqueados
+
+- `rm -rf /` — remoção total da raiz
+- `mkfs`, `fdisk`, `parted` — formatação/particionamento
+- `dd of=/dev/` — escrita direta em dispositivo
+- `shutdown`, `reboot`, `poweroff` — desligamento
+- `flashrom`, `efibootmgr` — firmware/EFI
+- Acesso a `/boot`, `/efi`, `/etc` críticos
+
+Visualize a lista completa:
+
+```bash
 nexus blocked
-nexus doctor
-nexus start
-nexus start --plain
-nexus start --task "Organize my downloads folder and create a summary"
-nexus update
-nexus uninstall
 ```
 
-### Troubleshooting
+### Zonas Seguras
 
-#### 1. `Dependencias da interface nao instaladas`
+Comandos são permitidos dentro de:
+- `~` (sua home)
+- `~/.nexus` (dados do Nexus)
+- `/tmp`, `/var/tmp` (temp)
+- Diretório atual de trabalho (`pwd`)
 
-Cause:
+---
 
-- `textual` or another dependency is missing
-
-Fix:
+## Comandos Principais
 
 ```bash
+# Setup inicial
+nexus setup                    # Configura provider, API, modelo, senha
+
+# Ajuda e diagnóstico
+nexus help                     # Ajuda interativa
+nexus onboarding               # Tour guiado
+nexus blocked                  # Lista comandos bloqueados
+nexus doctor                   # Diagnóstico do sistema
+
+# Execução
+nexus start                    # Inicia modo UI
+nexus start --plain            # Inicia modo terminal puro
+nexus start --task "objetivo"  # Executa tarefa inicial
+
+# Manutenção
+nexus update                   # Atualiza via git pull
+nexus uninstall                # Remove instalação local
+```
+
+---
+
+## Arquivos do Usuário
+
+O Nexus armazena tudo em `~/.nexus/`:
+
+| Arquivo | Descrição |
+|---------|-----------|
+| `config.json` | Provider, API key, model name |
+| `history.json` | Histórico recente da conversa (últimas 24 mensagens) |
+| `memory.json` | Memória local persistente (até 200 itens) |
+| `activity.json` | Estado atual do agente |
+| `nexus.log` | Logs detalhados de ações |
+| `repo.txt` | URL do repositório (usado no `update`) |
+
+---
+
+## Estrutura do Projeto
+
+```
+Nexus-Agent/
+├── src/
+│   ├── main.py                    # CLI entry point (nexus)
+│   ├── core/
+│   │   ├── llm.py                 # LiteLLM + PlannerExecutor
+│   │   ├── actions.py             # AcoesAgente (ToolRegistry)
+│   │   ├── tool_registry.py       # Sistema de ferramentas
+│   │   ├── safeguards.py          # Segurança (Luz Verde)
+│   │   ├── memory.py              # Memória local
+│   │   ├── config.py              # Configuração
+│   │   ├── state.py               # Monitor de atividade
+│   │   └── logging_utils.py       # Logging
+│   ├── ui/
+│   │   ├── app.py                 # Interface Textual (v2.0)
+│   │   ├── plain_cli.py           # CLI puro
+│   │   └── setup_cli.py           # Setup via terminal
+│   ├── pc_remote_agent/           # Automação de GUI
+│   ├── requirements.txt
+│   └── install.sh                 # Instalador viral
+└── README.md
+```
+
+---
+
+## Troubleshooting
+
+### 1. `nexus` não é reconhecido como comando
+
+**Causa:** PATH não recarregado após instalação.
+
+**Solução:**
+```bash
+# Abra um novo terminal
+source ~/.bashrc   # ou ~/.zshrc
+nexus doctor
+```
+
+### 2. `ERRO DE COMUNICACAO: VERIFIQUE SUA COTA`
+
+**Causa:** API key inválida, cota esgotada ou modelo errado.
+
+**Solução:**
+```bash
+nexus setup  # reconfigure
+```
+
+### 3. Interface não abre (textual não instalado)
+
+**Solução:**
+```bash
+# Reinstale dependências
+source ~/.nexus/env/bin/activate
 pip install -r requirements.txt
-```
 
-Or run plain mode:
-
-```bash
+# Ou use modo plain
 nexus start --plain
 ```
 
-#### 2. `ERRO DE COMUNICACAO: VERIFIQUE SUA COTA OU CHAVE DE API`
+### 4. Automação gráfica não funciona no Linux
 
-Cause:
+**Causa:** Sem acesso ao DISPLAY ou em SSH sem X11 forwarding.
 
-- invalid API key
-- exhausted quota
-- wrong model name
-- wrong provider setup
-
-Fix:
-
-1. run `nexus setup`
-2. check provider, API key, and model name
-3. retry
-
-#### 3. GUI automation does not work on Linux
-
-Cause:
-
-- no display access
-- incorrect `DISPLAY`
-- remote session without permissions
-
-Fix:
-
-- run `nexus doctor`
-- prefer `nexus start --plain` on remote environments
-- confirm GUI display access
-
-#### 4. `nexus` command is not found
-
-Cause:
-
-- terminal has not reloaded `PATH`
-- installation did not finish correctly
-
-Fix:
-
-- open a new terminal
-- or run directly:
-
+**Solução:**
 ```bash
-python3 main.py start --plain
-```
-
-#### 5. `nexus` opens an older unrelated program
-
-Cause:
-
-- another `nexus` script already exists on the machine
-- your `PATH` is resolving to an older launcher
-
-Fix:
-
-```bash
-which nexus
-type -a nexus
-```
-
-If needed, reinstall so the correct launcher is written to `~/.local/bin/nexus`:
-
-```bash
-./install.sh
-```
-
-Then open a new terminal and test:
-
-```bash
+# Verifique
 nexus doctor
+
+# Use modo plain em ambientes remotos
 nexus start --plain
 ```
 
-#### 6. How do I uninstall NEXUS AGENT?
+### 5. Como atualizar?
 
-Use:
+```bash
+nexus update
+# ou manual:
+git -C ~/.nexus/src pull origin main
+source ~/.nexus/env/bin/activate
+pip install -r ~/.nexus/src/requirements.txt
+```
+
+### 6. Como desinstalar?
 
 ```bash
 nexus uninstall
+# Remove ~/.nexus e ~/.local/bin/nexus
 ```
 
-This removes the local installation under `~/.nexus` and the user launcher in `~/.local/bin/nexus`.
+---
+
+## Roadmap
+
+- [x] v1.0 — UI Textual, ferramentas básicas, segurança
+- [x] v2.0 — Planner/Executor, Tool Registry, Modo Missão, Luz Verde real
+- [ ] v2.1 — Suporte a MCP (Model Context Protocol)
+- [ ] v2.2 — Notebook integration (Jupyter)
+- [ ] v3.0 — Agentes múltiplos em paralelo
+
+---
+
+## Contribuindo
+
+```bash
+git clone https://github.com/Ezequiel135/Nexus-Agent.git
+cd Nexus-Agent
+
+# Crie branch
+git checkout -b feature/nome-da-feature
+
+# Faça alterações, teste, commit
+git commit -m "feat: descrição da mudança"
+
+# Push e PR
+git push origin feature/nome-da-feature
+```
+
+---
+
+## Licença
+
+MIT — use, modifique, compartilhe.
+
+---
+
+<div align="center">
+
+**NEXUS AGENT** — autonomia local, cérebro de verdade.
+
+Feito por Ezequiel 135 · [GitHub](https://github.com/Ezequiel135/Nexus-Agent)
+
+</div>
