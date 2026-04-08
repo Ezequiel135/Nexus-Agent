@@ -1,4 +1,4 @@
-litellm
+litellm==1.72.6
 textual
 rich
 pyautogui

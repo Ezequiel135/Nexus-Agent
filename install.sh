@@ -35,7 +35,11 @@ mkdir -p "${NEXUS_HOME}"
 mkdir -p "${LOCAL_BIN_DIR}"
 
 if [ -x "${GLOBAL_WRAPPER_PATH}" ] && ! grep -q "NEXUS AGENT WRAPPER" "${GLOBAL_WRAPPER_PATH}" 2>/dev/null; then
-  if sudo test -w /usr/local/bin; then
+  if [ -w /usr/local/bin ]; then
+    LEGACY_BACKUP="/usr/local/bin/nexus.legacy.$(date +%s).bak"
+    mv "${GLOBAL_WRAPPER_PATH}" "${LEGACY_BACKUP}" || true
+    echo "Launcher antigo detectado em /usr/local/bin/nexus e movido para ${LEGACY_BACKUP}"
+  elif command -v sudo >/dev/null 2>&1 && sudo -n test -w /usr/local/bin 2>/dev/null; then
     LEGACY_BACKUP="/usr/local/bin/nexus.legacy.$(date +%s).bak"
     sudo mv "${GLOBAL_WRAPPER_PATH}" "${LEGACY_BACKUP}" || true
     echo "Launcher antigo detectado em /usr/local/bin/nexus e movido para ${LEGACY_BACKUP}"
