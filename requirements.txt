@@ -1,0 +1,10 @@
+litellm
+textual
+rich
+pyautogui
+python-dotenv
+requests
+mss
+Pillow
+pytesseract
+psutil
