@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import argparse
+import shutil
 import os
 import platform
 import subprocess
 import sys
+from pathlib import Path
 
 from core.config import NexusPaths, config_exists, load_config, verify_password
 from core.logging_utils import log_event
@@ -35,7 +37,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("blocked", help="Mostra os comandos e areas bloqueadas por seguranca")
     sub.add_parser("doctor", help="Mostra diagnostico do terminal e da plataforma")
+    sub.add_parser("onboarding", help="Abre a tela de boas-vindas e onboarding")
     sub.add_parser("setup", help="Forca o modo de configuracao inicial")
+    sub.add_parser("uninstall", help="Remove a instalacao local do NEXUS AGENT")
     sub.add_parser("update", help="Atualiza o NEXUS AGENT via git pull")
     return parser
 
@@ -62,6 +66,25 @@ def handle_doctor() -> int:
     print(f"repo_file={NexusPaths.repo_path}")
     print(f"activity_file={NexusPaths.activity_path}")
     print(f"memory_file={NexusPaths.memory_path}")
+    print(f"local_launcher={Path.home() / '.local/bin/nexus'}")
+    print(f"global_launcher=/usr/local/bin/nexus")
+    return 0
+
+
+def handle_uninstall() -> int:
+    targets = [
+        NexusPaths.base_dir,
+        Path.home() / ".local/bin/nexus",
+    ]
+    for target in targets:
+        if target.is_dir():
+            shutil.rmtree(target, ignore_errors=True)
+            print(f"Removido: {target}")
+        elif target.exists():
+            target.unlink(missing_ok=True)
+            print(f"Removido: {target}")
+    print("Desinstalacao local concluida.")
+    print("Se existir /usr/local/bin/nexus antigo, remova manualmente com sudo ou rode o install.sh novo para corrigi-lo.")
     return 0
 
 
@@ -117,6 +140,14 @@ def handle_start(task: str | None, plain: bool = False) -> int:
         monitor.stop()
 
 
+def handle_onboarding(plain: bool = False) -> int:
+    welcome_task = (
+        "Entre em modo onboarding. Apresente o NEXUS AGENT, explique comandos principais, "
+        "como salvar memoria local, como atualizar, como ver comandos bloqueados e como operar no modo terminal."
+    )
+    return handle_start(welcome_task, plain=plain)
+
+
 def handle_update() -> int:
     if not NexusPaths.repo_path.exists():
         print("Repositorio do NEXUS AGENT nao configurado em ~/.nexus/repo.txt")
@@ -153,8 +184,12 @@ def main(argv: list[str] | None = None) -> int:
         return handle_blocked()
     if args.command == "doctor":
         return handle_doctor()
+    if args.command == "onboarding":
+        return handle_onboarding(plain=True)
     if args.command == "update":
         return handle_update()
+    if args.command == "uninstall":
+        return handle_uninstall()
     if args.command == "start":
         return handle_start(args.task, plain=args.plain)
     return 0

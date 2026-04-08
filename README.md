@@ -62,6 +62,8 @@ nexus>
 Comandos internos:
 
 - `/help`
+- `/init`
+- `/onboarding`
 - `/status`
 - `/tools`
 - `/memory`
@@ -194,6 +196,8 @@ chmod +x install.sh nexus
 nexus start
 ```
 
+O instalador já tenta neutralizar conflito com launchers antigos chamados `nexus`. Se existir um `nexus` legado em `/usr/local/bin`, o processo tenta mover esse launcher antigo para backup e prioriza `~/.local/bin/nexus`.
+
 Instalação via GitHub:
 
 ```bash
@@ -252,12 +256,14 @@ Set-ExecutionPolicy -Scope Process Bypass
 
 ```bash
 nexus setup
+nexus onboarding
 nexus blocked
 nexus doctor
 nexus start
 nexus start --plain
 nexus start --task "Organize minha pasta de downloads e crie um resumo"
 nexus update
+nexus uninstall
 ```
 
 ### Arquivos do Usuário
@@ -374,6 +380,16 @@ Set-ExecutionPolicy -Scope Process Bypass
 .\install.ps1
 ```
 
+#### 7. Como desinstalar
+
+Use:
+
+```bash
+nexus uninstall
+```
+
+Esse comando remove a instalação local em `~/.nexus` e o launcher do usuário em `~/.local/bin/nexus`.
+
 ---
 
 ## English
@@ -428,6 +444,8 @@ nexus>
 Built-in commands:
 
 - `/help`
+- `/init`
+- `/onboarding`
 - `/status`
 - `/tools`
 - `/memory`
@@ -518,12 +536,14 @@ nexus start --plain
 
 ```bash
 nexus setup
+nexus onboarding
 nexus blocked
 nexus doctor
 nexus start
 nexus start --plain
 nexus start --task "Organize my downloads folder and create a summary"
 nexus update
+nexus uninstall
 ```
 
 ### Troubleshooting
@@ -617,3 +637,13 @@ Then open a new terminal and test:
 nexus doctor
 nexus start --plain
 ```
+
+#### 6. How do I uninstall NEXUS AGENT?
+
+Use:
+
+```bash
+nexus uninstall
+```
+
+This removes the local installation under `~/.nexus` and the user launcher in `~/.local/bin/nexus`.

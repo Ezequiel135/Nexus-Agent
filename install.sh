@@ -33,6 +33,17 @@ fi
 echo "[3/6] Preparando diretorios do NEXUS AGENT"
 mkdir -p "${NEXUS_HOME}"
 mkdir -p "${LOCAL_BIN_DIR}"
+
+if [ -x "${GLOBAL_WRAPPER_PATH}" ] && ! grep -q "NEXUS AGENT WRAPPER" "${GLOBAL_WRAPPER_PATH}" 2>/dev/null; then
+  if sudo test -w /usr/local/bin; then
+    LEGACY_BACKUP="/usr/local/bin/nexus.legacy.$(date +%s).bak"
+    sudo mv "${GLOBAL_WRAPPER_PATH}" "${LEGACY_BACKUP}" || true
+    echo "Launcher antigo detectado em /usr/local/bin/nexus e movido para ${LEGACY_BACKUP}"
+  else
+    echo "Aviso: existe um /usr/local/bin/nexus antigo. O launcher novo em ~/.local/bin/nexus vai ter prioridade."
+  fi
+fi
+
 if [ -d "${PROJECT_SOURCE}/.git" ] && [ -f "${PROJECT_SOURCE}/main.py" ]; then
   rm -rf "${SRC_DIR}"
   cp -r "${PROJECT_SOURCE}" "${SRC_DIR}"
@@ -56,6 +67,7 @@ fi
 echo "[6/6] Criando wrapper do usuario"
 cat > "${WRAPPER_PATH}" <<EOF
 #!/usr/bin/env bash
+# NEXUS AGENT WRAPPER
 exec "${ENV_DIR}/bin/python" "${SRC_DIR}/main.py" "\$@"
 EOF
 chmod +x "${WRAPPER_PATH}"
@@ -72,6 +84,7 @@ if [ "${NEXUS_INSTALL_GLOBAL:-0}" = "1" ]; then
   echo "Criando wrapper global em ${GLOBAL_WRAPPER_PATH}"
   sudo tee "${GLOBAL_WRAPPER_PATH}" >/dev/null <<EOF
 #!/usr/bin/env bash
+# NEXUS AGENT WRAPPER
 exec "${ENV_DIR}/bin/python" "${SRC_DIR}/main.py" "\$@"
 EOF
   sudo chmod +x "${GLOBAL_WRAPPER_PATH}"

@@ -144,10 +144,11 @@ class NexusApp(App[None]):
     Screen { background: #05070a; color: white; }
     #body { height: 1fr; padding: 0 1; }
     #chat-panel { width: 1fr; border: round #2ee6a6; margin-right: 1; padding: 0 1; background: #071018; }
-    #log-panel { width: 38; border: round #24c8ff; padding: 0 1; background: #08111a; }
+    #log-panel { width: 40; border: round #24c8ff; padding: 0 1; background: #08111a; }
     #chat-log, #action-log { height: 1fr; }
     #prompt { dock: bottom; margin-top: 1; }
     .panel-title { color: bright_cyan; text-style: bold; }
+    .hint-box { color: white; background: #0b1722; border: round #245c7a; padding: 0 1; margin-bottom: 1; }
     """
 
     BINDINGS = [("ctrl+c", "quit", "Sair")]
@@ -164,10 +165,12 @@ class NexusApp(App[None]):
         with Horizontal(id="body"):
             with Vertical(id="chat-panel"):
                 yield Static("Conversation", classes="panel-title")
+                yield Static("Descreva o objetivo. O agente usa shell, arquivos, tela, memoria e tools automaticamente.", classes="hint-box")
                 yield RichLog(id="chat-log", markup=True, wrap=True)
                 yield Input(placeholder="Digite um objetivo ou comando para o Nexus...", id="prompt")
             with Vertical(id="log-panel"):
                 yield Static("Action & Log Panel", classes="panel-title")
+                yield Static("Comandos uteis: onboarding | blocked | update | uninstall", classes="hint-box")
                 yield RichLog(id="action-log", markup=True, wrap=True)
         yield StatusBar(self.monitor)
         yield Footer()

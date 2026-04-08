@@ -56,9 +56,13 @@ class PlainNexusCLI:
             Panel.fit(
                 "[bold green]NEXUS AGENT[/bold green]\n"
                 "[yellow]Modo plain estilo Codex/Claude Code[/yellow]\n"
-                "[dim cyan]Criado por Ezequiel 135[/dim cyan]",
+                "[dim cyan]Criado por Ezequiel 135[/dim cyan]\n"
+                "[white]Shell + Files + Vision + Memory + Tool Use[/white]",
                 border_style="bright_cyan",
             )
+        )
+        self.console.print(
+            "[dim]Dica: use /help, /tools, /memory, /onboarding, /blocked e /exit[/dim]"
         )
 
     def _handle_prompt(self, prompt: str) -> None:
@@ -83,6 +87,8 @@ class PlainNexusCLI:
             table.add_column("Comando", style="cyan")
             table.add_column("Descricao", style="white")
             table.add_row("/help", "Mostra ajuda")
+            table.add_row("/init", "Alias para onboarding")
+            table.add_row("/onboarding", "Explica como usar o agente")
             table.add_row("/status", "Mostra status do agente")
             table.add_row("/tools", "Mostra as ferramentas locais que a IA sabe usar")
             table.add_row("/memory", "Mostra a memoria local salva")
@@ -100,6 +106,22 @@ class PlainNexusCLI:
                     f"estado={snap.state}\nmodelo={snap.current_model}\nlatencia={snap.api_latency_ms} ms\nautonomous={snap.autonomous_mode}",
                     title="Status",
                     border_style="yellow",
+                )
+            )
+            return False
+        if command in {"/init", "/onboarding"}:
+            self.console.print(
+                Panel.fit(
+                    "Bem-vindo ao NEXUS AGENT.\n\n"
+                    "1. Descreva um objetivo natural.\n"
+                    "2. O agente decide quando usar shell, arquivos, mouse, teclado e memoria.\n"
+                    "3. Use /tools para ver capacidades.\n"
+                    "4. Use /memory para ver memoria local.\n"
+                    "5. Use /blocked para ver o que nunca sera executado.\n"
+                    "6. Use nexus update para atualizar via GitHub.\n"
+                    "7. Use nexus uninstall para remover a instalacao local.",
+                    title="Onboarding",
+                    border_style="bright_cyan",
                 )
             )
             return False
