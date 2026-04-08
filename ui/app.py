@@ -84,7 +84,7 @@ class SetupApp(App[SetupPayload | None]):
     CSS = """
     Screen { background: black; color: white; }
     #setup-wrap { width: 80; height: auto; border: round cyan; padding: 1 2; margin: 2 4; }
-    .setup-title { color: bright_green; text-style: bold; }
+    .setup-title { color: ansi_bright_green; text-style: bold; }
     .field { margin-bottom: 1; }
     """
 
