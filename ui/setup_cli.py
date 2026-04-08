@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import getpass
+import os
+import sys
 
 from rich.console import Console
 from rich.panel import Panel
@@ -18,10 +20,21 @@ def run_plain_setup() -> None:
         )
     )
 
-    provider = _prompt_provider(console)
-    api_key = console.input("[bold cyan]API Key:[/bold cyan] ").strip()
-    model_name = console.input("[bold cyan]Model Name:[/bold cyan] ").strip()
-    password = getpass.getpass("NEXUS Password: ").strip()
+    if not sys.stdin.isatty():
+        provider = os.environ.get("NEXUS_PROVIDER", "OpenAI").strip() or "OpenAI"
+        api_key = os.environ.get("NEXUS_API_KEY", "").strip()
+        model_name = os.environ.get("NEXUS_MODEL_NAME", "").strip()
+        password = os.environ.get("NEXUS_PASSWORD", "").strip()
+        if not api_key or not model_name or not password:
+            raise SystemExit(
+                "Setup interativo indisponivel sem TTY. "
+                "Abra o comando em um terminal real ou defina NEXUS_PROVIDER, NEXUS_API_KEY, NEXUS_MODEL_NAME e NEXUS_PASSWORD."
+            )
+    else:
+        provider = _prompt_provider(console)
+        api_key = console.input("[bold cyan]API Key:[/bold cyan] ").strip()
+        model_name = console.input("[bold cyan]Model Name:[/bold cyan] ").strip()
+        password = getpass.getpass("NEXUS Password: ").strip()
 
     if not api_key or not model_name or not password:
         raise SystemExit("Setup cancelado: provider, API key, model e senha sao obrigatorios.")

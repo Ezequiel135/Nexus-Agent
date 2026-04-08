@@ -334,7 +334,34 @@ Solução:
 python3 main.py start --plain
 ```
 
-#### 5. PowerShell bloqueia o script `install.ps1`
+#### 5. `nexus` abre outro programa antigo
+
+Causa:
+
+- já existe outro script chamado `nexus` no sistema
+- o `PATH` está apontando para um launcher antigo
+
+Solução:
+
+```bash
+which nexus
+type -a nexus
+```
+
+Se necessário, reinstale o projeto para gravar o launcher correto em `~/.local/bin/nexus`:
+
+```bash
+./install.sh
+```
+
+Depois abra um novo terminal e teste:
+
+```bash
+nexus doctor
+nexus start --plain
+```
+
+#### 6. PowerShell bloqueia o script `install.ps1`
 
 Causa:
 
@@ -562,4 +589,31 @@ Fix:
 
 ```bash
 python3 main.py start --plain
+```
+
+#### 5. `nexus` opens an older unrelated program
+
+Cause:
+
+- another `nexus` script already exists on the machine
+- your `PATH` is resolving to an older launcher
+
+Fix:
+
+```bash
+which nexus
+type -a nexus
+```
+
+If needed, reinstall so the correct launcher is written to `~/.local/bin/nexus`:
+
+```bash
+./install.sh
+```
+
+Then open a new terminal and test:
+
+```bash
+nexus doctor
+nexus start --plain
 ```
