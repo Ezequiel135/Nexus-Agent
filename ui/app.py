@@ -141,12 +141,13 @@ class SetupApp(App[SetupPayload | None]):
 
 class NexusApp(App[None]):
     CSS = """
-    Screen { background: black; color: white; }
-    #body { height: 1fr; }
-    #chat-panel { width: 1fr; border: round bright_green; margin-right: 1; }
-    #log-panel { width: 36; border: round bright_cyan; }
+    Screen { background: #05070a; color: white; }
+    #body { height: 1fr; padding: 0 1; }
+    #chat-panel { width: 1fr; border: round #2ee6a6; margin-right: 1; padding: 0 1; background: #071018; }
+    #log-panel { width: 38; border: round #24c8ff; padding: 0 1; background: #08111a; }
     #chat-log, #action-log { height: 1fr; }
     #prompt { dock: bottom; margin-top: 1; }
+    .panel-title { color: bright_cyan; text-style: bold; }
     """
 
     BINDINGS = [("ctrl+c", "quit", "Sair")]
@@ -162,10 +163,11 @@ class NexusApp(App[None]):
         yield NexusHeader(self.monitor)
         with Horizontal(id="body"):
             with Vertical(id="chat-panel"):
+                yield Static("Conversation", classes="panel-title")
                 yield RichLog(id="chat-log", markup=True, wrap=True)
                 yield Input(placeholder="Digite um objetivo ou comando para o Nexus...", id="prompt")
             with Vertical(id="log-panel"):
-                yield Static("[bold cyan]Action & Log Panel[/bold cyan]")
+                yield Static("Action & Log Panel", classes="panel-title")
                 yield RichLog(id="action-log", markup=True, wrap=True)
         yield StatusBar(self.monitor)
         yield Footer()
@@ -175,6 +177,10 @@ class NexusApp(App[None]):
         self.conversation = self._load_history()
         ok, message = self.bridge.handshake()
         self._write_chat("[bold green]NEXUS AGENT online[/bold green]" if ok else f"[bold red]{message}[/bold red]")
+        self._write_chat(
+            "Use esta interface como um terminal-agente. "
+            "Descreva o objetivo e o NEXUS AGENT decide quando usar shell, arquivos, mouse, teclado, memoria e leitura de tela."
+        )
         self._write_log(message)
         self._write_log("Marca d'agua ativa: Ezequiel 135")
         if self.initial_task:

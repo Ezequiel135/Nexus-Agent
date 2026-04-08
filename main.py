@@ -67,8 +67,13 @@ def handle_doctor() -> int:
 
 def ensure_config(force_setup: bool = False) -> None:
     if force_setup or not config_exists():
-        _, SetupApp, _, _ = import_ui_components(required=True)
-        SetupApp().run()
+        _, SetupApp, _, _ = import_ui_components(required=False)
+        if SetupApp is not None:
+            SetupApp().run()
+            return
+        from ui.setup_cli import run_plain_setup
+
+        run_plain_setup()
 
 
 def should_use_plain_mode(force_plain: bool) -> bool:
