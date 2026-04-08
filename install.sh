@@ -9,91 +9,178 @@ WRAPPER_PATH="${LOCAL_BIN_DIR}/nexus"
 GLOBAL_WRAPPER_PATH="/usr/local/bin/nexus"
 DEFAULT_REPO_URL="https://github.com/Ezequiel135/Nexus-Agent.git"
 REPO_URL="${NEXUS_REPO_URL:-${DEFAULT_REPO_URL}}"
-PROJECT_SOURCE="$(pwd)"
 
-echo "[1/6] Verificando Python 3.10+"
-python3 - <<'PY'
-import sys
-raise SystemExit(0 if sys.version_info >= (3, 10) else 1)
-PY
+# Cores
+GREEN='\033[0;32m'
+CYAN='\033[0;36m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+NC='\033[0m'
 
-echo "[2/6] Verificando dependencias de sistema"
-if [ "${NEXUS_SKIP_APT:-0}" = "1" ]; then
-  echo "NEXUS_SKIP_APT=1 detectado. Pulando apt."
+echo -e "${CYAN}╔═══ NEXUS AGENT INSTALLER v2.0 ═══╗${NC}"
+echo -e "${CYAN}║  Criado por Ezequiel 135          ║${NC}"
+echo -e "${CYAN}╚═══════════════════════════════════╝${NC}"
+echo ""
+
+# OS Detection
+OS=""
+if [[ "$OSTYPE" == "linux-gnu"* ]]; then
+    OS="linux"
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        DISTRO="${NAME:-Linux}"
+        echo -e "${GREEN}[OS]${NC} Linux — $DISTRO"
+    fi
+elif [[ "$OSTYPE" == "darwin"* ]]; then
+    OS="macos"
+    echo -e "${GREEN}[OS]${NC} macOS"
 else
-  if sudo apt-get update; then
-    sudo apt-get install -y git python3-venv python3-pip python3-dev python3-tk scrot xdotool tesseract-ocr || \
-      echo "Aviso: nem todas as dependencias do sistema puderam ser instaladas. O modo plain ainda pode funcionar."
-  else
-    echo "Aviso: apt update falhou. Continuando com instalacao local mesmo assim."
-    echo "Se houver repositorio quebrado no sistema, corrija isso depois para habilitar instalacao completa de dependencias."
-  fi
+    OS="unknown"
+    echo -e "${YELLOW}[OS]${NC} Sistema nao detectado (${OSTYPE}). Continuando..."
 fi
 
-echo "[3/6] Preparando diretorios do NEXUS AGENT"
+# Python detection — tenta varias variantes
+PYTHON=""
+for p in python3 python python3.10 python3.11 python3.12; do
+    if command -v "$p" >/dev/null 2>&1; then
+        PYTHON="$p"
+        break
+    fi
+done
+
+if [ -z "$PYTHON" ]; then
+    echo -e "${RED}ERRO:${NC} Python nao encontrado. Instale Python 3.10+ primeiro."
+    if [ "$OS" = "linux" ]; then
+        echo "  Ubuntu/Debian: sudo apt install python3 python3-venv python3-pip"
+        echo "  Fedora: sudo dnf install python3"
+    elif [ "$OS" = "macos" ]; then
+        echo "  HomeBrew: brew install python3"
+    fi
+    exit 1
+fi
+
+PY_VERSION=$($PYTHON -c 'import sys; print(".".join(map(str, sys.version_info[:2])))')
+echo -e "${GREEN}[Python]${NC} $PYTHON — versao $PY_VERSION"
+
+# Checa 3.10+
+IFS='.' read -r MAJOR MINOR _ <<< "$PY_VERSION"
+if [ "$MAJOR" -lt 3 ] || ([ "$MAJOR" -eq 3 ] && [ "$MINOR" -lt 10 ]); then
+    echo -e "${RED}ERRO:${NC} Python 3.10+ necessario. Versao detectada: $PY_VERSION"
+    exit 1
+fi
+
+echo -e "[1/5] Verificando dependencias de sistema..."
+
+# Dependencias opcionais — avisa mas nao falha
+if [ "$OS" = "linux" ]; then
+    MISSING_DEPS=()
+    for dep in git python3-venv python3-pip scrot xdotool tesseract-ocr; do
+        if ! dpkg -l | grep -q "^ii  $dep"; then
+            MISSING_DEPS+=("$dep")
+        fi
+    done
+    if [ ${#MISSING_DEPS[@]} -gt 0 ]; then
+        echo -e "${YELLOW}Aviso:${NC} Dependencias faltando: ${MISSING_DEPS[*]}"
+        echo "  Instale com: sudo apt install ${MISSING_DEPS[*]}"
+        echo "  O NEXUS ainda funciona, mas recursos visuais poderao faltar."
+        read -p "Continuar mesmo assim? (s/N) " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Ss]$ ]]; then
+            exit 1
+        fi
+    fi
+fi
+
+echo -e "[2/5] Preparando diretorios..."
 mkdir -p "${NEXUS_HOME}"
 mkdir -p "${LOCAL_BIN_DIR}"
 
+# Limpa wrapper antigo se for genuino
 if [ -x "${GLOBAL_WRAPPER_PATH}" ] && ! grep -q "NEXUS AGENT WRAPPER" "${GLOBAL_WRAPPER_PATH}" 2>/dev/null; then
-  if [ -w /usr/local/bin ]; then
-    LEGACY_BACKUP="/usr/local/bin/nexus.legacy.$(date +%s).bak"
-    mv "${GLOBAL_WRAPPER_PATH}" "${LEGACY_BACKUP}" || true
-    echo "Launcher antigo detectado em /usr/local/bin/nexus e movido para ${LEGACY_BACKUP}"
-  elif command -v sudo >/dev/null 2>&1 && sudo -n test -w /usr/local/bin 2>/dev/null; then
-    LEGACY_BACKUP="/usr/local/bin/nexus.legacy.$(date +%s).bak"
-    sudo mv "${GLOBAL_WRAPPER_PATH}" "${LEGACY_BACKUP}" || true
-    echo "Launcher antigo detectado em /usr/local/bin/nexus e movido para ${LEGACY_BACKUP}"
-  else
-    echo "Aviso: existe um /usr/local/bin/nexus antigo. O launcher novo em ~/.local/bin/nexus vai ter prioridade."
-  fi
+    if [ -w /usr/local/bin ]; then
+        LEGACY_BACKUP="/usr/local/bin/nexus.legacy.$(date +%s).bak"
+        mv "${GLOBAL_WRAPPER_PATH}" "${LEGACY_BACKUP}" || true
+        echo -e "${YELLOW}[WARN]${NC} Wrapper antigo movido para ${LEGACY_BACKUP}"
+    elif command -v sudo >/dev/null 2>&1 && sudo -n test -w /usr/local/bin 2>/dev/null; then
+        LEGACY_BACKUP="/usr/local/bin/nexus.legacy.$(date +%s).bak"
+        sudo mv "${GLOBAL_WRAPPER_PATH}" "${LEGACY_BACKUP}" || true
+        echo -e "${YELLOW}[WARN]${NC} Wrapper antigo movido para ${LEGACY_BACKUP}"
+    fi
 fi
 
-if [ -d "${PROJECT_SOURCE}/.git" ] && [ -f "${PROJECT_SOURCE}/main.py" ]; then
-  rm -rf "${SRC_DIR}"
-  cp -r "${PROJECT_SOURCE}" "${SRC_DIR}"
+echo -e "[3/5] Clonando Nexus-Agent..."
+rm -rf "${SRC_DIR}"
+if [ -n "${NEXUS_LOCAL_SRC:-}" ] && [ -d "${NEXUS_LOCAL_SRC}/.git" ]; then
+    echo "  Usando fonte local de ${NEXUS_LOCAL_SRC}"
+    cp -r "${NEXUS_LOCAL_SRC}" "${SRC_DIR}"
 else
-  rm -rf "${SRC_DIR}"
-  git clone "${REPO_URL}" "${SRC_DIR}"
+    echo "  Clonando de ${REPO_URL} ..."
+    git clone --depth=1 "${REPO_URL}" "${SRC_DIR}" || {
+        echo -e "${RED}ERRO:${NC} Clone falhou. Verifique sua conexao ou token."
+        echo "  Dica: use NEXUS_REPO_URL='https://TOKEN@github.com/...'"
+        exit 1
+    }
 fi
 printf '%s\n' "${REPO_URL}" > "${NEXUS_HOME}/repo.txt"
 
-echo "[4/6] Criando ambiente virtual"
-python3 -m venv "${ENV_DIR}"
-"${ENV_DIR}/bin/pip" install --upgrade pip
+echo -e "[4/5] Criando ambiente virtual..."
+$PYTHON -m venv "${ENV_DIR}"
+"${ENV_DIR}/bin/pip" install --upgrade pip setuptools wheel
 
-echo "[5/6] Instalando dependencias Python"
-if ! "${ENV_DIR}/bin/pip" install -r "${SRC_DIR}/requirements.txt"; then
-  echo "Aviso: instalacao completa do requirements falhou."
-  echo "Tentando instalar ao menos o minimo para o modo plain..."
-  "${ENV_DIR}/bin/pip" install rich litellm requests python-dotenv psutil || true
+echo -e "[5/5] Instalando dependencias Python..."
+if ! "${ENV_DIR}/bin/pip" install -r "${SRC_DIR}/requirements.txt" 2>/dev/null; then
+    echo -e "${YELLOW}[WARN]${NC} requirements.txt completo falhou. Instalando conjunto minimo..."
+    "${ENV_DIR}/bin/pip" install rich litellm requests python-dotenv psutil textual
 fi
 
-echo "[6/6] Criando wrapper do usuario"
-cat > "${WRAPPER_PATH}" <<EOF
+echo ""
+echo -e "[6/6] Criando wrapper local..."
+
+# Wrapper em ~/.local/bin (garante prioridade sobre /usr/local/bin)
+cat > "${WRAPPER_PATH}" <<'EOF'
 #!/usr/bin/env bash
-# NEXUS AGENT WRAPPER
-exec "${ENV_DIR}/bin/python" "${SRC_DIR}/main.py" "\$@"
+# NEXUS AGENT WRAPPER v2
+export NEXUS_HOME="${HOME}/.nexus"
+exec "${NEXUS_HOME}/env/bin/python" "${NEXUS_HOME}/src/main.py" "$@"
 EOF
 chmod +x "${WRAPPER_PATH}"
 
-if ! printf '%s' ":$PATH:" | grep -q ":${LOCAL_BIN_DIR}:"; then
-  if [ -f "${HOME}/.bashrc" ]; then
-    if ! grep -Fq 'export PATH="$HOME/.local/bin:$PATH"' "${HOME}/.bashrc"; then
-      printf '\nexport PATH="$HOME/.local/bin:$PATH"\n' >> "${HOME}/.bashrc"
-    fi
-  fi
-fi
-
+# Wrapper global opcional
 if [ "${NEXUS_INSTALL_GLOBAL:-0}" = "1" ]; then
-  echo "Criando wrapper global em ${GLOBAL_WRAPPER_PATH}"
-  sudo tee "${GLOBAL_WRAPPER_PATH}" >/dev/null <<EOF
+    echo "  Criando wrapper global em ${GLOBAL_WRAPPER_PATH}..."
+    sudo tee "${GLOBAL_WRAPPER_PATH}" > /dev/null <<'EOF'
 #!/usr/bin/env bash
-# NEXUS AGENT WRAPPER
-exec "${ENV_DIR}/bin/python" "${SRC_DIR}/main.py" "\$@"
+# NEXUS AGENT WRAPPER v2 — global
+export NEXUS_HOME="${HOME}/.nexus"
+exec "${NEXUS_HOME}/env/bin/python" "${NEXUS_HOME}/src/main.py" "$@"
 EOF
-  sudo chmod +x "${GLOBAL_WRAPPER_PATH}"
+    sudo chmod +x "${GLOBAL_WRAPPER_PATH}"
 fi
 
-echo "Instalacao concluida. NEXUS AGENT criado por Ezequiel 135."
-echo "Abra um novo terminal e rode:"
-echo "  nexus start --plain"
+# PATH check
+if ! printf '%s' ":$PATH:" | grep -q ":${LOCAL_BIN_DIR}:"; then
+    if [ -f "${HOME}/.bashrc" ]; then
+        if ! grep -Fq 'export PATH="$HOME/.local/bin:$PATH"' "${HOME}/.bashrc"; then
+            printf '\n# Nexus Agent\nexport PATH="$HOME/.local/bin:$PATH"\n' >> "${HOME}/.bashrc"
+            echo -e "${GREEN}[PATH]${NC} ~/.local/bin adicionado ao .bashrc"
+        fi
+    fi
+    if [ -f "${HOME}/.zshrc" ]; then
+        if ! grep -Fq 'export PATH="$HOME/.local/bin:$PATH"' "${HOME}/.zshrc"; then
+            printf '\n# Nexus Agent\nexport PATH="$HOME/.local/bin:$PATH"\n' >> "${HOME}/.zshrc"
+            echo -e "${GREEN}[PATH]${NC} ~/.local/bin adicionado ao .zshrc"
+        fi
+    fi
+fi
+
+echo ""
+echo -e "${GREEN}╔═══ INSTALACAO CONCLUIDA ═══╗${NC}"
+echo -e "${GREEN}║  NEXUS AGENT v2.0          ║${NC}"
+echo -e "${GREEN}╚════════════════════════════╝${NC}"
+echo ""
+echo -e "${CYAN}Como usar:${NC}"
+echo "  1. Abra um NOVO terminal ou ${YELLOW}source ~/.bashrc${NC}"
+echo "  2. Execute: ${YELLOW}nexus${NC}"
+echo "  3. Ou mode plain CLI: ${YELLOW}nexus start --plain${NC}"
+echo ""
+echo -e "${GREEN}Ezequiel 135${NC}"

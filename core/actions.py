@@ -10,12 +10,15 @@ from .config import NexusPaths
 from .logging_utils import log_event
 from .memory import remember, search_memory
 from .safeguards import command_is_safe
+from .tool_registry import ToolRegistry
 
 
-class AcoesAgente:
+class AcoesAgente(ToolRegistry):
     def __init__(self) -> None:
+        super().__init__()
         NexusPaths.ensure()
         self._event_callback = None
+        self._register_tools()
 
     def set_event_callback(self, callback) -> None:
         self._event_callback = callback
@@ -24,101 +27,81 @@ class AcoesAgente:
         if self._event_callback is not None:
             self._event_callback(text)
 
-    @staticmethod
-    def tool_schemas() -> list[dict[str, Any]]:
-        return [
-            {
-                "type": "function",
-                "function": {
-                    "name": "executar_comando",
-                    "description": "Executa um comando de shell local com captura de stdout e stderr. Use para instalar, listar, mover, inspecionar sistema e operar no terminal.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "comando": {"type": "string"},
-                        },
-                        "required": ["comando"],
-                    },
+    def _register_tools(self) -> None:
+        self.register(
+            name="executar_comando",
+            description="Executa um comando de shell local com captura de stdout e stderr. Use para instalar, listar, mover, inspecionar sistema e operar no terminal.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "comando": {"type": "string", "description": "Comando shell a executar"},
                 },
+                "required": ["comando"],
             },
-            {
-                "type": "function",
-                "function": {
-                    "name": "gerenciar_arquivos",
-                    "description": "Le, escreve, deleta, move ou lista arquivos locais. Use quando a tarefa envolver editar codigo, criar documentos, reorganizar pastas ou inspecionar arquivos.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "acao": {"type": "string"},
-                            "path": {"type": "string"},
-                            "content": {"type": "string"},
-                            "target_path": {"type": "string"},
-                        },
-                        "required": ["acao", "path"],
-                    },
-                },
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "controle_periferico",
-                    "description": "Controla mouse, teclado e captura de tela. Acoes aceitas: clicar, digitar, mover_mouse, screenshot, posicao_cursor. Use quando a tarefa exigir mexer no PC visualmente.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "acao": {"type": "string"},
-                            "x": {"type": "integer"},
-                            "y": {"type": "integer"},
-                            "texto": {"type": "string"},
-                        },
-                        "required": ["acao"],
-                    },
-                },
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "memoria_local",
-                    "description": "Salva ou busca memoria local persistente do usuario. Use quando o usuario pedir para lembrar de algo, guardar uma preferencia ou recuperar contexto salvo.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "acao": {"type": "string"},
-                            "texto": {"type": "string"},
-                            "consulta": {"type": "string"},
-                        },
-                        "required": ["acao"],
-                    },
-                },
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "verificar_pixel",
-                    "description": "Retorna a cor RGB de um pixel da tela. Use para verificar se um botao, janela ou indicador mudou de cor depois de uma acao.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "x": {"type": "integer"},
-                            "y": {"type": "integer"},
-                        },
-                        "required": ["x", "y"],
-                    },
-                },
-            },
-        ]
-
-    @staticmethod
-    def capabilities_summary() -> str:
-        return (
-            "Ferramentas locais disponiveis: "
-            "1) executar_comando para operar no shell; "
-            "2) gerenciar_arquivos para ler, escrever, mover e deletar arquivos; "
-            "3) controle_periferico para clicar, digitar, mover o mouse, capturar screenshot e ler a posicao do cursor; "
-            "4) memoria_local para salvar e buscar lembrancas persistentes; "
-            "5) verificar_pixel para ler a cor RGB de um ponto da tela. "
-            "Se a tarefa mencionar tela, botao, navegador, janela, clicar, digitar no PC, mover mouse ou verificar cor, use controle_periferico e verificar_pixel em vez de responder apenas em texto."
+            func=self.executar_comando,
         )
+        self.register(
+            name="gerenciar_arquivos",
+            description="Le, escreve, deleta, move ou lista arquivos locais. Use quando a tarefa envolver editar codigo, criar documentos, reorganizar pastas ou inspecionar arquivos.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "acao": {"type": "string", "enum": ["ler", "escrever", "listar", "mover", "deletar"]},
+                    "path": {"type": "string"},
+                    "content": {"type": "string"},
+                    "target_path": {"type": "string"},
+                },
+                "required": ["acao", "path"],
+            },
+            func=self.gerenciar_arquivos,
+        )
+        self.register(
+            name="controle_periferico",
+            description="Controla mouse, teclado e captura de tela. Acoes: clicar, digitar, mover_mouse, screenshot, posicao_cursor.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "acao": {"type": "string", "enum": ["clicar", "digitar", "mover_mouse", "screenshot", "posicao_cursor"]},
+                    "x": {"type": "integer"},
+                    "y": {"type": "integer"},
+                    "texto": {"type": "string"},
+                },
+                "required": ["acao"],
+            },
+            func=self.controle_periferico,
+        )
+        self.register(
+            name="memoria_local",
+            description="Salva ou busca memoria local persistente do usuario.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "acao": {"type": "string", "enum": ["salvar", "buscar", "limpar"]},
+                    "texto": {"type": "string"},
+                    "consulta": {"type": "string"},
+                },
+                "required": ["acao"],
+            },
+            func=self.memoria_local,
+        )
+        self.register(
+            name="verificar_pixel",
+            description="Retorna a cor RGB de um pixel da tela.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "x": {"type": "integer"},
+                    "y": {"type": "integer"},
+                },
+                "required": ["x", "y"],
+            },
+            func=self.verificar_pixel,
+        )
+
+    def dispatch_tool(self, name: str, arguments: dict[str, Any]) -> str:
+        return self.executar(name, arguments)
+
+    # --- Ferramentas ---
 
     def executar_comando(self, comando: str) -> str:
         allowed, reason = command_is_safe(comando)
@@ -146,32 +129,38 @@ class AcoesAgente:
         self._emit(line)
 
         if acao == "ler":
+            if not target.exists():
+                return json.dumps({"ok": False, "erro": f"Arquivo nao encontrado: {target}"}, ensure_ascii=False)
             return target.read_text(encoding="utf-8")
         if acao == "escrever":
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(content or "", encoding="utf-8")
-            return f"Arquivo salvo em {target}"
+            return json.dumps({"ok": True, "path": str(target)}, ensure_ascii=False)
         if acao == "listar":
             if not target.exists():
                 return "[]"
-            return json.dumps(sorted(item.name for item in target.iterdir()), ensure_ascii=False)
+            return json.dumps(sorted([item.name for item in target.iterdir()], key=lambda x: x.lower()), ensure_ascii=False)
         if acao == "mover":
             if not target_path:
                 raise ValueError("target_path e obrigatorio para mover")
+            source = Path(path).expanduser()
             destination = Path(target_path).expanduser()
+            if not source.exists():
+                return json.dumps({"ok": False, "erro": f"Arquivo nao encontrado: {source}"}, ensure_ascii=False)
             destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(target), str(destination))
-            return f"Movido para {destination}"
+            shutil.move(str(source), str(destination))
+            return json.dumps({"ok": True, "from": str(source), "to": str(destination)}, ensure_ascii=False)
         if acao == "deletar":
+            target = Path(path).expanduser()
+            if not target.exists():
+                return json.dumps({"ok": False, "erro": "Arquivo inexistente"}, ensure_ascii=False)
+            trash_target = NexusPaths.trash_dir / target.name
             if target.is_dir():
-                trash_target = NexusPaths.trash_dir / target.name
                 shutil.move(str(target), str(trash_target))
-                return f"Diretorio movido para lixeira segura: {trash_target}"
-            if target.exists():
-                trash_target = NexusPaths.trash_dir / target.name
+                return json.dumps({"ok": True, "moved_to": str(trash_target), "type": "diretorio"}, ensure_ascii=False)
+            else:
                 shutil.move(str(target), str(trash_target))
-                return f"Arquivo movido para lixeira segura: {trash_target}"
-            return "Arquivo inexistente"
+                return json.dumps({"ok": True, "moved_to": str(trash_target), "type": "arquivo"}, ensure_ascii=False)
         raise ValueError(f"Acao de arquivo desconhecida: {acao}")
 
     def controle_periferico(self, acao: str, x: int | None = None, y: int | None = None, texto: str | None = None) -> str:
@@ -181,20 +170,20 @@ class AcoesAgente:
 
         if acao == "clicar":
             runtime.click(x=x, y=y)
-            return "Clique executado"
+            return json.dumps({"ok": True, "action": "clicar", "x": x, "y": y}, ensure_ascii=False)
         if acao == "digitar":
             runtime.type_text(texto or "")
-            return "Texto digitado"
+            return json.dumps({"ok": True, "action": "digitar", "text_len": len(texto or "")}, ensure_ascii=False)
         if acao == "mover_mouse":
             if x is None or y is None:
-                raise ValueError("x e y sao obrigatorios para mover_mouse")
+                return json.dumps({"ok": False, "erro": "x e y sao obrigatorios"}, ensure_ascii=False)
             runtime.move_to(x, y)
-            return "Mouse movido"
+            return json.dumps({"ok": True, "action": "mover_mouse", "x": x, "y": y}, ensure_ascii=False)
         if acao == "screenshot":
             image, _, _ = runtime.screen_image()
             shot_path = NexusPaths.base_dir / "last_screenshot.png"
             image.save(shot_path)
-            return f"Screenshot salva em {shot_path}"
+            return json.dumps({"ok": True, "path": str(shot_path)}, ensure_ascii=False)
         if acao == "posicao_cursor":
             pos = runtime.mouse_position()
             return json.dumps({"x": int(pos[0]), "y": int(pos[1])}, ensure_ascii=False)
@@ -202,7 +191,6 @@ class AcoesAgente:
 
     def verificar_pixel(self, x: int, y: int) -> str:
         from pc_remote_agent import runtime
-
         image, _, _ = runtime.screen_image()
         r, g, b = image.getpixel((x, y))
         self._emit(f"PIXEL: ({x},{y}) -> rgb({r},{g},{b})")
@@ -211,7 +199,7 @@ class AcoesAgente:
     def memoria_local(self, acao: str, texto: str | None = None, consulta: str | None = None) -> str:
         if acao == "salvar":
             if not texto:
-                raise ValueError("texto e obrigatorio para salvar memoria")
+                return json.dumps({"ok": False, "erro": "texto e obrigatorio"}, ensure_ascii=False)
             item = remember(texto, source="assistant", kind="memory")
             self._emit(f"MEMORIA: salvo -> {item.text}")
             return json.dumps({"ok": True, "saved": item.text, "timestamp": item.timestamp}, ensure_ascii=False)
@@ -220,17 +208,8 @@ class AcoesAgente:
             payload = [{"timestamp": item.timestamp, "text": item.text, "kind": item.kind} for item in items]
             self._emit(f"MEMORIA: busca por '{consulta or ''}' retornou {len(payload)} itens")
             return json.dumps(payload, ensure_ascii=False)
+        if acao == "limpar":
+            from .memory import clear_memory
+            clear_memory()
+            return json.dumps({"ok": True, "cleared": True}, ensure_ascii=False)
         raise ValueError(f"Acao de memoria desconhecida: {acao}")
-
-    def dispatch_tool(self, name: str, arguments: dict[str, Any]) -> str:
-        if name == "executar_comando":
-            return self.executar_comando(**arguments)
-        if name == "gerenciar_arquivos":
-            return self.gerenciar_arquivos(**arguments)
-        if name == "controle_periferico":
-            return self.controle_periferico(**arguments)
-        if name == "memoria_local":
-            return self.memoria_local(**arguments)
-        if name == "verificar_pixel":
-            return self.verificar_pixel(**arguments)
-        raise ValueError(f"Ferramenta desconhecida: {name}")

@@ -16,12 +16,12 @@ from core.config import NexusConfig, NexusPaths, create_password_hash, save_conf
 from core.llm import LiteLLMBridge
 from core.logging_utils import log_event
 from core.state import ActivityMonitor, LIGHT_COLORS, LIGHT_SYMBOLS
+from core.safeguards import assess_command_light
 
 
 def _cpu_and_ram() -> str:
     try:
         import psutil
-
         return f"CPU {psutil.cpu_percent(interval=0):.0f}% | RAM {psutil.virtual_memory().percent:.0f}%"
     except Exception:
         return "CPU/RAM indisponivel"
@@ -57,7 +57,7 @@ class NexusHeader(Static):
             "| . ` |  __|  /  \\  | | \\___ \\ \n"
             "| |\\  | |____/ /\\ \\_| |_ ____) |\n"
             "|_| \\_|______/_/  \\_\\_____|____/[/bold cyan]\n"
-            f"[bold green]NEXUS AGENT v1.0 - STATUS: [OPERACIONAL][/bold green]   [{color}]{dot}[/{color}]\n"
+            f"[bold green]NEXUS AGENT v2.0 — STATUS: [OPERACIONAL][/bold green]   [{color}]{dot}[/{color}]\n"
             "[dim cyan]Criado por Ezequiel 135[/dim cyan]"
         )
 
@@ -73,7 +73,7 @@ class StatusBar(Static):
 
     def refresh_status(self) -> None:
         snap = self.monitor.read()
-        mode = "AUTONOMOUS_MODE=ON" if snap.autonomous_mode else "AUTONOMOUS_MODE=OFF"
+        mode = "MISSION_MODE=ON" if snap.autonomous_mode else "AUTO=OFF"
         self.update(
             f"[black on bright_cyan] Modelo: {snap.current_model} | Latencia: {snap.api_latency_ms} ms | "
             f"{_cpu_and_ram()} | {mode} | Ezequiel 135 [/]"
@@ -139,6 +139,26 @@ class SetupApp(App[SetupPayload | None]):
         self.exit(SetupPayload(str(provider), api_key, model_name, password))
 
 
+class MissionPanel(Static):
+    """Shows current mission plan and step progress."""
+    pass
+
+
+class GreenLightBar(Static):
+    """Visual indicator of safety status."""
+    def __init__(self):
+        super().__init__()
+        self.status = "🟢 LUZ VERDE — ambiente seguro"
+        self.can_focus = False
+
+    def set_status(self, status: str, emoji: str = "🟢") -> None:
+        self.status = f"{emoji} {status}"
+        self.refresh()
+
+    def render(self) -> str:
+        return self.status
+
+
 class NexusApp(App[None]):
     CSS = """
     Screen { background: #05070a; color: white; }
@@ -149,9 +169,11 @@ class NexusApp(App[None]):
     #prompt { dock: bottom; margin-top: 1; }
     .panel-title { color: bright_cyan; text-style: bold; }
     .hint-box { color: white; background: #0b1722; border: round #245c7a; padding: 0 1; margin-bottom: 1; }
+    #mission-panel { height: auto; border: round bright_magenta; margin-bottom: 1; padding: 1; background: #12081a; }
+    #light-bar { text-style: bold; dock: top; height: 1; content-align: center middle; background: #0a2a0a; }
     """
 
-    BINDINGS = [("ctrl+c", "quit", "Sair")]
+    BINDINGS = [("ctrl+c", "quit", "Sair"), ("ctrl+m", "mission_mode", "Modo Missao")]
 
     def __init__(self, bridge: LiteLLMBridge, monitor: ActivityMonitor, initial_task: str | None = None) -> None:
         super().__init__()
@@ -159,9 +181,12 @@ class NexusApp(App[None]):
         self.monitor = monitor
         self.initial_task = initial_task
         self.conversation: list[dict[str, str]] = []
+        self.mission_mode = False
 
     def compose(self) -> ComposeResult:
+        yield GreenLightBar(id="light-bar")
         yield NexusHeader(self.monitor)
+        yield MissionPanel("", id="mission-panel")
         with Horizontal(id="body"):
             with Vertical(id="chat-panel"):
                 yield Static("Conversation", classes="panel-title")
@@ -179,13 +204,13 @@ class NexusApp(App[None]):
         self.bridge.actions.set_event_callback(lambda text: self.call_from_thread(self._write_log, text))
         self.conversation = self._load_history()
         ok, message = self.bridge.handshake()
-        self._write_chat("[bold green]NEXUS AGENT online[/bold green]" if ok else f"[bold red]{message}[/bold red]")
+        self._write_chat("[bold green]NEXUS AGENT v2.0 ONLINE[/bold green]" if ok else f"[bold red]{message}[/bold red]")
         self._write_chat(
-            "Use esta interface como um terminal-agente. "
-            "Descreva o objetivo e o NEXUS AGENT decide quando usar shell, arquivos, mouse, teclado, memoria e leitura de tela."
+            "Use esta interface como um agente autonomo. "
+            "Descreva um objetivo (ex: 'organiza minha pasta Downloads') e o NEXUS PLANEJA + EXECUTA."
         )
         self._write_log(message)
-        self._write_log("Marca d'agua ativa: Ezequiel 135")
+        self._write_log("Modo Missao: decomposicao automatica de tarefas. Marca d'agua: Ezequiel 135")
         if self.initial_task:
             self.query_one("#prompt", Input).value = self.initial_task
             self._submit_prompt(self.initial_task)
@@ -195,6 +220,15 @@ class NexusApp(App[None]):
 
     def _write_log(self, text: str) -> None:
         self.query_one("#action-log", RichLog).write(text)
+
+    def _set_light(self, assessment: str) -> None:
+        light = self.query_one("#light-bar", GreenLightBar)
+        if "Vermelha" in assessment or "Bloqueado" in assessment:
+            light.set_status(assessment, "🔴")
+        elif "Amarela" in assessment or "Atencao" in assessment:
+            light.set_status(assessment, "🟡")
+        else:
+            light.set_status(assessment, "🟢")
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         if event.input.id != "prompt":
@@ -206,9 +240,15 @@ class NexusApp(App[None]):
 
     def _submit_prompt(self, prompt: str) -> None:
         self._write_chat(f"**Você:** {prompt}")
-        threading.Thread(target=self._process_prompt, args=(prompt,), daemon=True).start()
+        # Se o prompt parece uma tarefa complexa, ativa mission mode
+        if len(prompt.split()) > 4 or any(w in prompt.lower() for w in ["organizar", "criar", "baixar", "instalar", "configurar", "buscar", "processar"]):
+            self.mission_mode = True
+            threading.Thread(target=self._process_plan, args=(prompt,), daemon=True).start()
+        else:
+            self.mission_mode = False
+            threading.Thread(target=self._process_simple, args=(prompt,), daemon=True).start()
 
-    def _process_prompt(self, prompt: str) -> None:
+    def _process_simple(self, prompt: str) -> None:
         try:
             log_event("PROMPT", prompt)
             self.conversation.append({"role": "user", "content": prompt})
@@ -220,9 +260,78 @@ class NexusApp(App[None]):
             for item in tool_logs:
                 self.call_from_thread(self._write_log, item)
             if not tool_logs:
-                self.call_from_thread(self._write_log, "Nenhuma ferramenta local foi usada nesta resposta.")
+                self.call_from_thread(self._write_log, "Nenhuma ferramenta local usada.")
         except Exception as exc:
             self.monitor.set_state("error", str(exc))
+            self.call_from_thread(self._write_chat, f"**ERRO:** {exc}")
+            self.call_from_thread(self._write_log, f"[ERROR] {exc}")
+
+    def _process_plan(self, prompt: str) -> None:
+        try:
+            log_event("MISSION", prompt)
+            self.call_from_thread(self._write_chat, f"[bold cyan]🎯 MODO MISSAO ATIVADO[/bold cyan]")
+            self.call_from_thread(self._write_chat, f"[dim]Criando plano para: {prompt}[/dim]")
+
+            result = self.bridge.chat_with_plan(prompt)
+
+            goal = result.get("goal", "")
+            steps = result.get("results", [])
+            summary = result.get("summary", "")
+
+            # Mostra o plano
+            plan_lines = ["[bold yellow]📋 PLANO:[/bold yellow]"]
+            for s in steps:
+                plan_lines.append(f"  {s['step']}. {s['task']}")
+                if s.get("tool"):
+                    plan_lines.append(f"     [cyan]→ {s['tool']}({s.get('args', {})})[/cyan]")
+            self.call_from_thread(self._write_chat, "\n".join(plan_lines))
+
+            # Executa cada passo — cada passo gera log proprio
+            self.call_from_thread(self._write_chat, f"[bold green]🚀 EXECUTANDO {len(steps)} PASSOS...[/bold green]")
+
+            all_logs: list[str] = []
+            for s in steps:
+                log_line = f" PASSO {s['step']}/{len(steps)}: {s['task'][:60]}"
+                self.call_from_thread(self._write_log, f"[bold yellow]▶{log_line}[/bold yellow]")
+
+                # Verifica luz verde para comandos shell
+                if s.get("tool") == "executar_comando":
+                    cmd = s.get("args", {}).get("comando", "")
+                    assessment = assess_command_light(cmd)
+                    self.call_from_thread(self._set_light, assessment)
+                    if "Vermelha" in assessment or "Bloqueado" in assessment:
+                        err = f"🚫 {assessment} — comando nao executado"
+                        self.call_from_thread(self._write_log, f"[bold red]{err}[/bold red]")
+                        s["result"] = err
+                        s["status"] = "BLOCKED"
+                        continue
+
+                tool_name = s.get("tool")
+                args = s.get("args") or {}
+                try:
+                    r = self.bridge.actions.executar(tool_name, args) if tool_name else f"[livre] {s.get('task','')}"
+                    s["result"] = str(r)[:200]
+                    s["status"] = "OK"
+                    all_logs.append(f"{tool_name or 'acao'}({args})")
+                except Exception as e:
+                    s["result"] = f"Erro: {e}"
+                    s["status"] = "FAIL"
+                    all_logs.append(f"ERRO: {e}")
+
+            # Volta luz verde
+            self.call_from_thread(self._set_light, "🟢 LUZ VERDE — missao concluida", "🟢")
+            self.call_from_thread(self._write_chat, f"[bold green]✅ {summary}[/bold green]")
+
+            # Salva na memoria
+            from core.memory import remember
+            remember(f"Missao: {prompt} — {len(steps)} passos executados", kind="mission")
+
+            # Log final
+            self.call_from_thread(self._write_log, f"[bold green]MISSION COMPLETE: {len(steps)} etapas[/bold green]")
+
+        except Exception as exc:
+            self.monitor.set_state("error", str(exc))
+            self.call_from_thread(self._set_light, f"🔴 ERRO: {exc}", "🔴")
             self.call_from_thread(self._write_chat, f"**ERRO:** {exc}")
             self.call_from_thread(self._write_log, f"[ERROR] {exc}")
 

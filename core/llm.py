@@ -11,14 +11,122 @@ from .state import ActivityMonitor
 
 
 SYSTEM_PROMPT = (
-    "Voce e o Nexus Agent. Voce tem permissao Root. "
-    "Suas respostas devem ser curtas e focadas em acoes. "
-    "Quando precisar agir no computador, use as ferramentas disponiveis no seu toolkit. "
-    "Voce nao pede permissao para subtarefas; voce executa e reporta. "
-    "Quando o usuario der um objetivo complexo, decomponha em microtarefas, execute em loop e finalize apenas quando concluir. "
-    "Se a tarefa envolver interface grafica, tela, janela, mouse, teclado, botao, cor, cursor, navegador ou clicar em algo no desktop, priorize o uso das tools visuais e de periferico. "
-    "Se o usuario pedir para lembrar, salvar preferencia, guardar contexto ou manter uma informacao importante para depois, use a tool memoria_local."
+    "Voce e o Nexus Agent, um agente autonomo com acesso a ferramentas. "
+    "Voce tem permissao root no sistema local. "
+    "Suas respostas podem usar ferramentas para agir no mundo real. "
+    "Nao peca permissao — execute e reporte. "
+    "Tarefas complexas devem ser decompostas em passos. "
+    "Se a tarefa envolver tela, mouse, teclado ou browser, use as ferramentas visuais."
 )
+
+PLANNER_PROMPT = (
+    "Voce e um planner de agentes autonomos. "
+    "Dado um objetivo do usuario, crie um plano detalhado de sub-tarefas. "
+    "Responda em JSON no formato:\n"
+    '{"plan": [{"step": 1, "task": "descricao da tarefa", "tool": "nome da ferramenta", "args": {...}}]}\n'
+    "Use apenas as ferramentas disponiveis. Se nao precisar de ferramenta, use \"tool\": null.\n"
+    "Se o objetivo for simples, pode retornar apenas uma tarefa."
+)
+
+
+class PlannerExecutor:
+    def __init__(self, config: NexusConfig, monitor: ActivityMonitor, actions: AcoesAgente) -> None:
+        self.config = config
+        self.monitor = monitor
+        self.actions = actions
+        self.config.export_runtime_env()
+        self.monitor.set_model(config.model_name)
+
+    def _completion(self, messages: list[dict[str, Any]]) -> Any:
+        try:
+            from litellm import completion
+        except ImportError as exc:
+            raise RuntimeError("LiteLLM nao esta instalado no ambiente atual.") from exc
+
+        started = time.perf_counter()
+        response = completion(model=self.config.model_name, messages=messages)
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        self.monitor.set_latency(latency_ms)
+        return response
+
+    @staticmethod
+    def _message_content(message: Any) -> str:
+        content = getattr(message, "content", "")
+        if isinstance(content, list):
+            return "\n".join(item.get("text", "") for item in content if isinstance(item, dict))
+        return content or ""
+
+    def _chat(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None) -> Any:
+        self.monitor.set_state("thinking")
+        response = self._completion(messages)
+        self.monitor.set_state("idle")
+        return response
+
+    def _create_plan(self, goal: str) -> list[dict[str, Any]]:
+        prompt = f"{PLANNER_PROMPT}\n\nObjetivo: {goal}\n\nFerramentas disponiveis:\n{self.actions.capabilities_summary()}"
+        messages = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": prompt},
+        ]
+        resp = self._chat(messages)
+        text = self._message_content(resp.choices[0].message).strip()
+
+        try:
+            data = json.loads(text)
+            if isinstance(data, dict) and "plan" in data:
+                return data["plan"]
+        except json.JSONDecodeError:
+            pass
+
+        return [{"step": 1, "task": goal, "tool": None, "args": {}}]
+
+    def execute(self, goal: str) -> dict[str, Any]:
+        plan = self._create_plan(goal)
+        results: list[dict[str, Any]] = []
+
+        for i, step in enumerate(plan, 1):
+            task_desc = step.get("task", "")
+            tool_name = step.get("tool")
+            args = step.get("args") or {}
+            reason = step.get("reason", "")
+
+            self.monitor.set_state("acting")
+            result_text = ""
+
+            if tool_name and tool_name != "null":
+                try:
+                    result_text = self.actions.executar(tool_name, args)
+                except Exception as e:
+                    result_text = f"Erro em {tool_name}: {e}"
+            else:
+                result_text = f"Acao livre: {task_desc}"
+                from .logging_utils import log_event
+                log_event("ACAO_LIVRE", task_desc)
+
+            results.append({
+                "step": i,
+                "task": task_desc,
+                "tool": tool_name,
+                "args": args,
+                "result": result_text,
+                "reason": reason,
+            })
+
+        self.monitor.set_state("idle")
+        return {
+            "goal": goal,
+            "plan_steps": len(plan),
+            "results": results,
+            "summary": self._summarize(results),
+        }
+
+    @staticmethod
+    def _summarize(results: list[dict[str, Any]]) -> str:
+        lines = ["[PLANO CONCLUIDO]"]
+        for r in results:
+            status = "OK" if "Erro" not in str(r.get("result", "")) else "FAIL"
+            lines.append(f"  Passo {r['step']}: {r['task'][:50]}... -> {r.get('tool','livre')} [{status}]")
+        return "\n".join(lines)
 
 
 class LiteLLMBridge:
@@ -26,6 +134,7 @@ class LiteLLMBridge:
         self.config = config
         self.monitor = monitor
         self.actions = actions
+        self.planner = PlannerExecutor(config, monitor, actions)
         self.config.export_runtime_env()
         self.monitor.set_model(config.model_name)
 
@@ -88,6 +197,8 @@ class LiteLLMBridge:
             *conversation,
         ]
         tool_logs: list[str] = []
+        last_user_msg = conversation[-1].get("content", "") if conversation else ""
+
         for _ in range(max_rounds):
             self.monitor.set_state("thinking")
             response = self._completion(messages, tools=self.actions.tool_schemas())
@@ -119,3 +230,9 @@ class LiteLLMBridge:
 
         self.monitor.set_state("idle")
         return "Tarefa interrompida apos muitas rodadas de ferramentas. Revise o objetivo ou refine a estrategia.", tool_logs
+
+    def chat_with_plan(self, goal: str) -> dict[str, Any]:
+        self.monitor.set_state("planning")
+        execution = self.planner.execute(goal)
+        self.monitor.set_state("idle")
+        return execution
