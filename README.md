@@ -197,8 +197,30 @@ nexus start
 Instalação via GitHub:
 
 ```bash
-export NEXUS_REPO_URL="https://github.com/ezequiel135/nexus-agent.git"
-curl -sSL https://raw.githubusercontent.com/ezequiel135/nexus-agent/main/install.sh | bash
+export NEXUS_REPO_URL="https://github.com/Ezequiel135/Nexus-Agent.git"
+curl -sSL https://raw.githubusercontent.com/Ezequiel135/Nexus-Agent/main/install.sh | bash
+```
+
+Baixar com `git clone`:
+
+```bash
+git clone https://github.com/Ezequiel135/Nexus-Agent.git
+cd "Nexus-Agent"
+chmod +x install.sh nexus
+./install.sh
+```
+
+Baixar como ZIP:
+
+1. Abra `https://github.com/Ezequiel135/Nexus-Agent`
+2. Clique em `Code`
+3. Clique em `Download ZIP`
+4. Extraia a pasta
+5. Entre na pasta extraída e rode:
+
+```bash
+chmod +x install.sh nexus
+./install.sh
 ```
 
 ### Instalação no Windows Terminal / PowerShell
@@ -215,6 +237,15 @@ Passo a passo:
 Set-ExecutionPolicy -Scope Process Bypass
 .\install.ps1
 nexus start --plain
+```
+
+Baixar do GitHub no Windows:
+
+```powershell
+git clone https://github.com/Ezequiel135/Nexus-Agent.git
+cd Nexus-Agent
+Set-ExecutionPolicy -Scope Process Bypass
+.\install.ps1
 ```
 
 ### Comandos Principais
@@ -436,8 +467,8 @@ nexus start
 GitHub install:
 
 ```bash
-export NEXUS_REPO_URL="https://github.com/ezequiel135/nexus-agent.git"
-curl -sSL https://raw.githubusercontent.com/ezequiel135/nexus-agent/main/install.sh | bash
+export NEXUS_REPO_URL="https://github.com/Ezequiel135/Nexus-Agent.git"
+curl -sSL https://raw.githubusercontent.com/Ezequiel135/Nexus-Agent/main/install.sh | bash
 ```
 
 ### Windows Terminal / PowerShell Installation

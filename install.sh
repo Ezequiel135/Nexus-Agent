@@ -5,7 +5,7 @@ NEXUS_HOME="${HOME}/.nexus"
 ENV_DIR="${NEXUS_HOME}/env"
 SRC_DIR="${NEXUS_HOME}/src"
 WRAPPER_PATH="/usr/local/bin/nexus"
-DEFAULT_REPO_URL="https://github.com/ezequiel135/nexus-agent.git"
+DEFAULT_REPO_URL="https://github.com/Ezequiel135/Nexus-Agent.git"
 REPO_URL="${NEXUS_REPO_URL:-${DEFAULT_REPO_URL}}"
 PROJECT_SOURCE="$(pwd)"
 
