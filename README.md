@@ -136,6 +136,9 @@ Usuário → Objetivo → PlannerExecutor → Plano JSON
 
 ### Opção 1: Installer Viral (recomendado)
 
+Importante: depois do clone, o comando global `nexus` só deve ser usado depois de executar `./install.sh`.
+Se você rodar `nexus start` antes disso, pode acabar abrindo outro launcher antigo já instalado no sistema.
+
 ```bash
 # Clone o repositório
 git clone https://github.com/Ezequiel135/Nexus-Agent.git
@@ -173,7 +176,10 @@ pip install -r requirements.txt
 # Configure
 python main.py setup
 
-# Rode
+# Rode direto do repositório, sem depender do comando global
+./nexus start
+
+# Ou rode via Python
 python main.py start
 ```
 
@@ -438,7 +444,33 @@ source ~/.bashrc   # ou ~/.zshrc
 nexus doctor
 ```
 
-### 2. `ERRO DE COMUNICACAO: VERIFIQUE SUA COTA`
+### 2. Apareceu `NEXUS COMPRESSOR` ou outro programa antigo ao rodar `nexus`
+
+**Causa:** o shell está chamando outro arquivo, normalmente `/usr/local/bin/nexus`, e não o launcher deste repositório.
+
+**Como confirmar:**
+```bash
+type -a nexus
+```
+
+Se aparecer `/usr/local/bin/nexus` com banner de outro projeto, você ainda não está executando o NEXUS AGENT deste repositório.
+
+**Solução:**
+```bash
+# Dentro do clone, rode direto do projeto
+cd Nexus-Agent
+./nexus start
+
+# Ou instale corretamente e recarregue o terminal
+chmod +x install.sh nexus
+./install.sh
+source ~/.bashrc
+type -a nexus
+```
+
+Se continuar apontando para um launcher antigo em `/usr/local/bin/nexus`, remova ou renomeie esse arquivo antigo antes de usar `nexus`.
+
+### 3. `ERRO DE COMUNICACAO: VERIFIQUE SUA COTA`
 
 **Causa:** API key inválida, cota esgotada ou modelo errado.
 
@@ -447,7 +479,7 @@ nexus doctor
 nexus setup  # reconfigure
 ```
 
-### 3. Interface não abre (textual não instalado)
+### 4. Interface não abre (textual não instalado)
 
 **Solução:**
 ```bash
@@ -459,7 +491,7 @@ pip install -r requirements.txt
 nexus start --plain
 ```
 
-### 4. Automação gráfica não funciona no Linux
+### 5. Automação gráfica não funciona no Linux
 
 **Causa:** Sem acesso ao DISPLAY ou em SSH sem X11 forwarding.
 
