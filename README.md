@@ -1,4 +1,4 @@
-# NEXUS AGENT 26.1.0
+# NEXUS AGENT 26.1.1
 
 <div align="center">
 
@@ -57,7 +57,7 @@ Diferente de assistentes que só respondem, o Nexus **planeja, age e reporta**. 
 - **Capacidades:** shell, arquivos, OCR, mouse, teclado, memória, MCP, notebooks e bots remotos.
 - **Escala:** múltiplas contas, múltiplos agentes e execução paralela.
 - **Segurança:** comandos avaliados por Luz Verde antes da execução.
-- **Versão atual:** `26.1.0`, com versionamento CalVer.
+- **Versão atual:** `26.1.1`, com versionamento CalVer.
 
 ### Quick Start
 
@@ -137,9 +137,9 @@ Se quiser forçar um navegador específico, defina `NEXUS_BROWSER=chrome`, `chro
 
 ## MCP
 
-Na linha `26.1.0`, o NEXUS AGENT suporta **MCP (Model Context Protocol)** via `stdio`.
+Na linha `26.1.1`, o NEXUS AGENT suporta **MCP (Model Context Protocol)** via `stdio`.
 
-### MCP na versão 26.1.0
+### MCP na versão 26.1.1
 
 - Cadastro de servidores MCP no `config.json`
 - Comandos CLI para adicionar, listar, ler recursos e remover servidores MCP
@@ -169,10 +169,12 @@ nexus mcp remove filesystem
 
 ## Notebook + Bots Remotos
 
-A versão `26.1.0` consolida **Notebook integration (Jupyter)**, **automação remota por bots** e **agentes múltiplos em paralelo**.
+A versão `26.1.1` mantém **Notebook integration (Jupyter)**, **automação remota por bots** e **agentes múltiplos em paralelo**, com foco nesta release em corrigir a UI inicial de configuração.
 
-### O que entra na 26.1.0
+### O que entra na 26.1.1
 
+- UI inicial de configuração refeita do zero, com layout responsivo, rolagem e foco correto
+- Campos de texto e navegação do setup ajustados para evitar travamentos
 - Comandos CLI para criar, listar, ler, editar e executar notebooks `.ipynb`
 - Diretório padrão `~/.nexus/notebooks` para armazenar notebooks do agente
 - Ferramenta `gerenciar_notebooks` exposta ao LLM
@@ -221,7 +223,7 @@ nexus remote disarm
 ## Arquitetura
 
 ```
-NEXUS AGENT 26.1.0
+NEXUS AGENT 26.1.1
 ├── core/
 │   ├── llm.py           # LiteLLMBridge + PlannerExecutor
 │   ├── actions.py       # AcoesAgente (ToolRegistry)

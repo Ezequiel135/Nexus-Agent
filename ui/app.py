@@ -8,8 +8,8 @@ from dataclasses import dataclass
 
 from rich.markdown import Markdown
 from textual.app import App, ComposeResult
-from textual.containers import Container, Horizontal, Vertical
-from textual.widgets import Footer, Input, RichLog, Select, Static
+from textual.containers import Container, Horizontal, Vertical, VerticalScroll
+from textual.widgets import Button, Footer, Input, RichLog, Select, Static
 
 from core.actions import AcoesAgente
 from core.config import (
@@ -98,107 +98,296 @@ class StatusBar(Static):
 
 class SetupApp(App[SetupPayload | None]):
     CSS = """
-    Screen { background: black; color: white; }
-    #setup-wrap { width: 108; height: auto; border: round cyan; padding: 1 2; margin: 1 2; }
-    .setup-title { color: ansi_bright_green; text-style: bold; }
-    .field { margin-bottom: 1; width: 1fr; height: 3; }
-    .setup-section { border: round #245c7a; padding: 1; margin-bottom: 1; background: #0b1722; }
-    .setup-section-title { color: ansi_bright_cyan; text-style: bold; margin-bottom: 1; }
-    .setup-help { color: #a8c7d8; margin-bottom: 1; }
-    Input, Select { width: 1fr; color: white; background: #111923; border: round #245c7a; }
-    Input:focus, Select:focus { background: #162430; border: round #2ee6a6; }
-    .hidden { display: none; }
+    Screen {
+        background: #041019;
+        color: #f3fbff;
+    }
+    #setup-shell {
+        width: 1fr;
+        height: 1fr;
+        overflow-y: auto;
+        align-horizontal: center;
+    }
+    #setup-card {
+        width: 1fr;
+        max-width: 112;
+        margin: 1 2 2 2;
+        padding: 0 0 2 0;
+    }
+    #setup-hero {
+        border: round #28bff0;
+        background: #081621;
+        padding: 1 2;
+        margin-bottom: 1;
+    }
+    .setup-brand {
+        color: #7ef5c5;
+        text-style: bold;
+    }
+    .setup-title {
+        color: #ffffff;
+        text-style: bold;
+        margin-top: 1;
+    }
+    .setup-lead {
+        color: #a8c7d8;
+        margin-top: 1;
+    }
+    #setup-live-status {
+        border: round #244b63;
+        background: #0c1c28;
+        color: #d9efff;
+        padding: 1;
+        margin-top: 1;
+    }
+    .setup-section {
+        border: round #235e7e;
+        background: #091521;
+        padding: 1 2;
+        margin-top: 1;
+    }
+    .setup-section-title {
+        color: #67dbff;
+        text-style: bold;
+        margin-bottom: 1;
+    }
+    .setup-section-help {
+        color: #a8c7d8;
+        margin-bottom: 1;
+    }
+    .setup-label {
+        color: #f3fbff;
+        text-style: bold;
+        margin-top: 1;
+    }
+    .setup-hint {
+        color: #97b4c7;
+        margin-bottom: 1;
+    }
+    .field {
+        width: 1fr;
+        margin-bottom: 1;
+        min-height: 3;
+    }
+    Input, Select {
+        width: 1fr;
+        color: #ffffff;
+        background: #112231;
+        border: round #27536b;
+    }
+    Input:focus, Select:focus {
+        background: #183346;
+        border: round #2ee6a6;
+    }
+    #custom-provider-wrap {
+        margin-top: 1;
+    }
+    #setup-actions {
+        height: auto;
+        margin-top: 1;
+    }
+    #reset_setup, #submit_setup {
+        width: 1fr;
+        min-height: 3;
+    }
+    #reset_setup {
+        margin-right: 1;
+        background: #102130;
+        color: #f3fbff;
+        border: round #335b73;
+    }
+    #submit_setup {
+        background: #2ee6a6;
+        color: #041410;
+        text-style: bold;
+        border: none;
+    }
+    #setup-footer-note {
+        color: #97b4c7;
+        margin-top: 1;
+    }
     """
 
-    BINDINGS = [("ctrl+c", "quit", "Sair")]
+    BINDINGS = [
+        ("ctrl+s", "submit_setup", "Salvar"),
+        ("ctrl+r", "reset_setup", "Limpar"),
+        ("ctrl+c", "quit", "Sair"),
+    ]
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._provider_autofocus_enabled = False
 
     def compose(self) -> ComposeResult:
-        provider_options = []
-        for provider in KNOWN_PROVIDERS:
-            label = "Outro / Custom" if provider == "Custom" else provider
-            provider_options.append((label, provider))
-        yield Container(
-            Static("NEXUS AGENT SETUP OBRIGATORIO", classes="setup-title"),
-            Static(
-                "Preencha cada caixa com um tipo de dado separado. "
-                "Nao misture API Key com URL.",
-                classes="setup-help",
-            ),
-            Static("Tipo de UI"),
-            Select(
-                [
-                    ("Visual completa", "visual"),
-                    ("Terminal puro", "plain"),
-                ],
-                value="visual",
-                id="ui_mode",
-                classes="field",
-            ),
-            Static("Nome da conta"),
-            Input(value="Conta principal", id="account_name", classes="field"),
-            Static("Provider"),
-            Select(
-                provider_options,
-                value="OpenAI",
-                id="provider",
-                classes="field",
-            ),
-            Container(
-                Static("Provider custom / Outro", classes="setup-section-title"),
-                Static(
-                    "Se escolheu Outro / Custom, preencha os campos abaixo separadamente.",
-                    classes="setup-help",
-                ),
-                Static("Nome/ID do provider custom"),
-                Static(
-                    "Coloque aqui somente o nome/ID do provider. Ex: openrouter, azure, provider-interno.",
-                    classes="setup-help",
-                ),
-                Input(placeholder="openai / openrouter / provider interno", id="custom_provider", classes="field"),
-                Static("Base URL / Endpoint"),
-                Static(
-                    "Coloque aqui somente a URL base/endpoint. Ex: https://api.exemplo.com/v1",
-                    classes="setup-help",
-                ),
-                Input(placeholder="https://api.exemplo.com/v1", id="base_url", classes="field"),
-                id="custom-provider-wrap",
-                classes="setup-section",
-            ),
-            Container(
-                Static("Credenciais da conta", classes="setup-section-title"),
-                Static("API Key"),
-                Static(
-                    "Coloque aqui somente a API Key da conta. Nao coloque URL neste campo.",
-                    classes="setup-help",
-                ),
-                Input(password=True, id="api_key", classes="field"),
-                id="api-key-wrap",
-                classes="setup-section",
-            ),
-            Static("Model Name"),
-            Input(placeholder="gpt-4o-mini / claude-3-5-sonnet / llama3", id="model_name", classes="field"),
-            Static("Nome do agente inicial"),
-            Input(value="Agente principal", id="agent_name", classes="field"),
-            Static("Instrucao extra do agente (opcional)"),
-            Input(placeholder="Ex: foco em automacao, organizacao e resposta curta", id="agent_prompt", classes="field"),
-            Static("NEXUS Password"),
-            Input(password=True, id="password", classes="field"),
-            Static("Pressione Enter no campo de senha para concluir."),
-            id="setup-wrap",
-        )
+        provider_options = [(("Outro / Custom" if provider == "Custom" else provider), provider) for provider in KNOWN_PROVIDERS]
+        with VerticalScroll(id="setup-shell"):
+            with Container(id="setup-card"):
+                with Container(id="setup-hero"):
+                    yield Static(f"NEXUS AGENT {APP_VERSION}", classes="setup-brand")
+                    yield Static("Configuracao Inicial", classes="setup-title")
+                    yield Static(
+                        "Formulario redesenhado para funcionar melhor em qualquer terminal: "
+                        "sem largura fixa, com rolagem e com foco previsivel em todos os campos.",
+                        classes="setup-lead",
+                    )
+                    yield Static("", id="setup-live-status")
+
+                with Container(classes="setup-section"):
+                    yield Static("Ambiente", classes="setup-section-title")
+                    yield Static(
+                        "Defina como o Nexus vai abrir e identifique a conta principal desta instalacao.",
+                        classes="setup-section-help",
+                    )
+                    yield Static("Interface inicial", classes="setup-label")
+                    yield Static("Escolha entre interface visual completa ou terminal puro.", classes="setup-hint")
+                    yield Select(
+                        [
+                            ("Visual completa", "visual"),
+                            ("Terminal puro", "plain"),
+                        ],
+                        value="visual",
+                        id="ui_mode",
+                        classes="field",
+                    )
+                    yield Static("Nome da conta", classes="setup-label")
+                    yield Static("Exemplo: Conta principal, Trabalho, Cliente X.", classes="setup-hint")
+                    yield Input(value="Conta principal", id="account_name", classes="field")
+
+                with Container(classes="setup-section"):
+                    yield Static("Provider e Acesso", classes="setup-section-title")
+                    yield Static(
+                        "Preencha cada caixa com um tipo de dado separado. "
+                        "Nao misture API Key, nome do provider e URL no mesmo campo.",
+                        classes="setup-section-help",
+                    )
+                    yield Static("Provider", classes="setup-label")
+                    yield Static("Escolha o provedor principal da conta.", classes="setup-hint")
+                    yield Select(provider_options, value="OpenAI", id="provider", classes="field")
+                    with Container(id="custom-provider-wrap", classes="setup-section"):
+                        yield Static("Provider custom", classes="setup-section-title")
+                        yield Static("Obrigatorio apenas quando o provider for Outro / Custom.", classes="setup-section-help")
+                        yield Static("Nome/ID do provider custom", classes="setup-label")
+                        yield Static(
+                            "Exemplos: openrouter, azure, provider-interno.",
+                            classes="setup-hint",
+                        )
+                        yield Input(
+                            placeholder="openrouter / azure / provider interno",
+                            id="custom_provider",
+                            classes="field",
+                        )
+                    yield Static("Base URL / Endpoint", classes="setup-label")
+                    yield Static(
+                        "Opcional para providers padrao e obrigatorio para provider custom.",
+                        classes="setup-hint",
+                    )
+                    yield Input(
+                        placeholder="https://api.exemplo.com/v1",
+                        id="base_url",
+                        classes="field",
+                    )
+                    yield Static("API Key", classes="setup-label")
+                    yield Static("Cole somente a chave da conta neste campo.", classes="setup-hint")
+                    yield Input(password=True, id="api_key", classes="field")
+                    yield Static("Modelo", classes="setup-label")
+                    yield Static(
+                        "Exemplos: gpt-4o-mini, claude-3-5-sonnet, llama3.",
+                        classes="setup-hint",
+                    )
+                    yield Input(
+                        placeholder="gpt-4o-mini / claude-3-5-sonnet / llama3",
+                        id="model_name",
+                        classes="field",
+                    )
+
+                with Container(classes="setup-section"):
+                    yield Static("Perfil do Agente", classes="setup-section-title")
+                    yield Static(
+                        "O agente pode ter um nome proprio e uma instrucao extra para orientar o comportamento.",
+                        classes="setup-section-help",
+                    )
+                    yield Static("Nome do agente inicial", classes="setup-label")
+                    yield Static("Exemplo: Agente principal, Revisor, Automacao.", classes="setup-hint")
+                    yield Input(value="Agente principal", id="agent_name", classes="field")
+                    yield Static("Instrucao extra do agente", classes="setup-label")
+                    yield Static("Opcional. Exemplo: resposta curta, foco em automacao e organizacao.", classes="setup-hint")
+                    yield Input(
+                        placeholder="Ex: foco em automacao, organizacao e resposta curta",
+                        id="agent_prompt",
+                        classes="field",
+                    )
+
+                with Container(classes="setup-section"):
+                    yield Static("Seguranca", classes="setup-section-title")
+                    yield Static(
+                        "Essa senha protege o modo autonomo do Nexus e sera exigida em operacoes sensiveis.",
+                        classes="setup-section-help",
+                    )
+                    yield Static("Senha mestra do Nexus", classes="setup-label")
+                    yield Static("Use uma senha que voce consiga lembrar com seguranca.", classes="setup-hint")
+                    yield Input(password=True, id="password", classes="field")
+
+                with Horizontal(id="setup-actions"):
+                    yield Button("Resetar campos", id="reset_setup")
+                    yield Button("Salvar configuracao", id="submit_setup")
+
+                yield Static(
+                    "Dica: Tab navega entre campos. Enter avanca para o proximo campo. Ctrl+S salva e Ctrl+R limpa.",
+                    id="setup-footer-note",
+                )
+        yield Footer()
 
     def on_mount(self) -> None:
         self._toggle_custom_provider_fields()
-        self.call_after_refresh(self._focus_setup_input)
+        self._update_setup_summary()
+        self.call_after_refresh(self._finish_initial_setup)
+
+    def _finish_initial_setup(self) -> None:
+        self._focus_setup_input()
+        self._provider_autofocus_enabled = True
+
+    def action_submit_setup(self) -> None:
+        self._submit_setup()
+
+    def action_reset_setup(self) -> None:
+        self.query_one("#ui_mode", Select).value = "visual"
+        self.query_one("#account_name", Input).value = "Conta principal"
+        self.query_one("#provider", Select).value = "OpenAI"
+        self.query_one("#custom_provider", Input).value = ""
+        self.query_one("#base_url", Input).value = ""
+        self.query_one("#api_key", Input).value = ""
+        self.query_one("#model_name", Input).value = ""
+        self.query_one("#agent_name", Input).value = "Agente principal"
+        self.query_one("#agent_prompt", Input).value = ""
+        self.query_one("#password", Input).value = ""
+        self._toggle_custom_provider_fields()
+        self._update_setup_summary()
+        self._focus_setup_input()
+        self.notify("Formulario resetado.", title="Setup", severity="information")
 
     def on_select_changed(self, event: Select.Changed) -> None:
         if event.select.id == "provider":
             self._toggle_custom_provider_fields()
-            next_field = "#custom_provider" if normalize_provider(str(event.value or "OpenAI")) == "Custom" else "#api_key"
-            self.call_after_refresh(lambda: self.query_one(next_field, Input).focus())
+            if self._provider_autofocus_enabled:
+                next_field = "custom_provider" if normalize_provider(str(event.value or "OpenAI")) == "Custom" else "api_key"
+                self.call_after_refresh(self._focus_field, next_field)
+        self._update_setup_summary()
+
+    def on_input_changed(self, _event: Input.Changed) -> None:
+        self._update_setup_summary()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "submit_setup":
+            self._submit_setup()
+            return
+        if event.button.id == "reset_setup":
+            self.action_reset_setup()
 
     def _focus_setup_input(self) -> None:
-        self.query_one("#account_name", Input).focus()
+        self._focus_field("account_name")
+
+    def _focus_field(self, field_id: str) -> None:
+        self.query_one(f"#{field_id}").focus()
 
     def _toggle_custom_provider_fields(self) -> None:
         provider = str(self.query_one("#provider", Select).value or "OpenAI")
@@ -206,11 +395,53 @@ class SetupApp(App[SetupPayload | None]):
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         if event.input.id != "password":
-            self._focus_next_setup_input(event.input.id)
+            self._focus_next_setup_field(event.input.id)
             return
-        ui_mode = self.query_one("#ui_mode", Select).value or "visual"
+        self._submit_setup()
+
+    def _visible_setup_order(self) -> list[str]:
+        order = [
+            "account_name",
+            "provider",
+            "custom_provider",
+            "base_url",
+            "api_key",
+            "model_name",
+            "agent_name",
+            "agent_prompt",
+            "password",
+            "submit_setup",
+        ]
+        if normalize_provider(str(self.query_one("#provider", Select).value or "OpenAI")) != "Custom":
+            order.remove("custom_provider")
+        return order
+
+    def _focus_next_setup_field(self, field_id: str) -> None:
+        order = self._visible_setup_order()
+        if field_id not in order:
+            return
+        index = order.index(field_id)
+        if index + 1 < len(order):
+            self._focus_field(order[index + 1])
+
+    def _update_setup_summary(self) -> None:
+        ui_mode = str(self.query_one("#ui_mode", Select).value or "visual")
+        provider = str(self.query_one("#provider", Select).value or "OpenAI")
+        custom_provider = self.query_one("#custom_provider", Input).value.strip()
+        provider_label = custom_provider if normalize_provider(provider) == "Custom" and custom_provider else provider
         account_name = self.query_one("#account_name", Input).value.strip() or "Conta principal"
-        provider = self.query_one("#provider", Select).value or "OpenAI"
+        agent_name = self.query_one("#agent_name", Input).value.strip() or "Agente principal"
+        model_name = self.query_one("#model_name", Input).value.strip() or "defina um modelo"
+        ui_label = "Visual completa" if ui_mode == "visual" else "Terminal puro"
+        self.query_one("#setup-live-status", Static).update(
+            f"UI: {ui_label} | Conta: {account_name} | Agente: {agent_name} | "
+            f"Provider: {provider_label} | Modelo: {model_name}"
+        )
+
+    def _submit_setup(self) -> None:
+        ui_mode = str(self.query_one("#ui_mode", Select).value or "visual")
+        account_name = self.query_one("#account_name", Input).value.strip() or "Conta principal"
+        provider = str(self.query_one("#provider", Select).value or "OpenAI")
         custom_provider = self.query_one("#custom_provider", Input).value.strip()
         base_url = self.query_one("#base_url", Input).value.strip()
         api_key = self.query_one("#api_key", Input).value.strip()
@@ -218,30 +449,32 @@ class SetupApp(App[SetupPayload | None]):
         agent_name = self.query_one("#agent_name", Input).value.strip() or "Agente principal"
         agent_prompt = self.query_one("#agent_prompt", Input).value.strip()
         password = self.query_one("#password", Input).value.strip()
+
         if not api_key:
-            self.notify("Preencha a API Key da conta.")
-            self.query_one("#api_key", Input).focus()
+            self.notify("Informe a API Key da conta.", title="Setup incompleto", severity="error")
+            self._focus_field("api_key")
             return
         if not model_name:
-            self.notify("Preencha o Model Name.")
-            self.query_one("#model_name", Input).focus()
+            self.notify("Informe o modelo principal da conta.", title="Setup incompleto", severity="error")
+            self._focus_field("model_name")
             return
         if not password:
-            self.notify("Preencha a senha do Nexus.")
-            self.query_one("#password", Input).focus()
+            self.notify("Informe a senha mestra do Nexus.", title="Setup incompleto", severity="error")
+            self._focus_field("password")
             return
-        if normalize_provider(str(provider)) == "Custom" and not custom_provider:
-            self.notify("Provider custom exige Nome/ID do provider.")
-            self.query_one("#custom_provider", Input).focus()
+        if normalize_provider(provider) == "Custom" and not custom_provider:
+            self.notify("Provider custom exige Nome/ID do provider.", title="Setup incompleto", severity="error")
+            self._focus_field("custom_provider")
             return
-        if normalize_provider(str(provider)) == "Custom" and not base_url:
-            self.notify("Provider custom exige Base URL / Endpoint.")
-            self.query_one("#base_url", Input).focus()
+        if normalize_provider(provider) == "Custom" and not base_url:
+            self.notify("Provider custom exige Base URL / Endpoint.", title="Setup incompleto", severity="error")
+            self._focus_field("base_url")
             return
+
         password_hash, salt = create_password_hash(password)
         account = make_account(
             name=account_name,
-            provider=str(provider),
+            provider=provider,
             api_key=api_key,
             model_name=model_name,
             base_url=base_url,
@@ -253,23 +486,8 @@ class SetupApp(App[SetupPayload | None]):
             system_prompt=agent_prompt,
         )
         save_config(build_initial_config(password_hash, salt, str(ui_mode), account, agent))
-        self.exit(SetupPayload(str(ui_mode), account_name, str(provider), model_name, agent_name, password))
-
-    def _focus_next_setup_input(self, input_id: str) -> None:
-        provider = str(self.query_one("#provider", Select).value or "OpenAI")
-        custom_mode = normalize_provider(provider) == "Custom"
-        next_map = {
-            "account_name": "custom_provider" if custom_mode else "api_key",
-            "custom_provider": "base_url",
-            "base_url": "api_key",
-            "api_key": "model_name",
-            "model_name": "agent_name",
-            "agent_name": "agent_prompt",
-            "agent_prompt": "password",
-        }
-        next_id = next_map.get(input_id)
-        if next_id:
-            self.query_one(f"#{next_id}", Input).focus()
+        self.notify("Configuracao salva com sucesso.", title="Setup", severity="information")
+        self.exit(SetupPayload(ui_mode, account_name, provider, model_name, agent_name, password))
 
 
 class MissionPanel(Static):

@@ -46,5 +46,5 @@ if ($profileText -notmatch [regex]::Escape($NexusHome)) {
     Add-Content $PROFILE "`n`$env:Path += ';$NexusHome'"
 }
 
-Write-Host "Instalacao do NEXUS AGENT 26.1.0 concluida. Abra um novo terminal e rode: nexus"
+Write-Host "Instalacao do NEXUS AGENT 26.1.1 concluida. Abra um novo terminal e rode: nexus"
 Write-Host "Na primeira abertura, escolha a UI (Visual ou Plain) e conclua o setup."
