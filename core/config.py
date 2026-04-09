@@ -9,6 +9,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 KNOWN_PROVIDERS = ("OpenAI", "Anthropic", "Google", "Ollama", "Groq", "Custom")
+KNOWN_REMOTE_CHANNELS = ("telegram", "whatsapp")
 RUNTIME_ENV_KEYS = (
     "OPENAI_API_KEY",
     "OPENAI_BASE_URL",
@@ -72,6 +73,17 @@ class NexusMcpServer:
 
 
 @dataclass(slots=True)
+class NexusRemoteIntegration:
+    id: str
+    name: str
+    channel: str
+    enabled: bool = True
+    command_prefix: str = "!nexus"
+    allowed_senders: list[str] = field(default_factory=list)
+    settings: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
 class NexusConfig:
     password_hash: str
     password_salt: str
@@ -81,6 +93,8 @@ class NexusConfig:
     agents: list[NexusAgentProfile] = field(default_factory=list)
     active_agent_id: str = ""
     mcp_servers: list[NexusMcpServer] = field(default_factory=list)
+    remote_armed: bool = False
+    remote_integrations: list[NexusRemoteIntegration] = field(default_factory=list)
 
     @property
     def active_account(self) -> NexusAccount | None:
@@ -190,6 +204,7 @@ class NexusPaths:
     config_path = base_dir / "config.json"
     log_path = base_dir / "nexus.log"
     trash_dir = base_dir / "trash"
+    notebooks_dir = base_dir / "notebooks"
     history_path = base_dir / "history.json"
     activity_path = base_dir / "activity.json"
     repo_path = base_dir / "repo.txt"
@@ -199,6 +214,7 @@ class NexusPaths:
     def ensure(cls) -> None:
         cls.base_dir.mkdir(parents=True, exist_ok=True)
         cls.trash_dir.mkdir(parents=True, exist_ok=True)
+        cls.notebooks_dir.mkdir(parents=True, exist_ok=True)
         os.chmod(cls.base_dir, 0o700)
 
 
@@ -230,6 +246,13 @@ def normalize_provider(value: str | None) -> str:
         if raw.lower() == provider.lower():
             return provider
     return "Custom"
+
+
+def normalize_remote_channel(value: str | None) -> str:
+    normalized = (value or "").strip().lower()
+    if normalized in KNOWN_REMOTE_CHANNELS:
+        return normalized
+    return "telegram"
 
 
 def sanitize_base_url(value: str | None) -> str:
@@ -289,6 +312,29 @@ def make_agent(
     )
 
 
+def make_remote_integration(
+    name: str,
+    channel: str,
+    *,
+    command_prefix: str = "!nexus",
+    allowed_senders: list[str] | None = None,
+    settings: dict[str, str] | None = None,
+    enabled: bool = True,
+    existing_ids: set[str] | None = None,
+) -> NexusRemoteIntegration:
+    existing_ids = existing_ids or set()
+    normalized_name = name.strip() or "Integracao remota"
+    return NexusRemoteIntegration(
+        id=unique_id(normalized_name, normalize_remote_channel(channel), existing_ids),
+        name=normalized_name,
+        channel=normalize_remote_channel(channel),
+        enabled=enabled,
+        command_prefix=(command_prefix or "!nexus").strip(),
+        allowed_senders=[item.strip() for item in (allowed_senders or []) if item.strip()],
+        settings={str(key): str(value).strip() for key, value in (settings or {}).items() if str(value).strip()},
+    )
+
+
 def build_initial_config(
     password_hash: str,
     password_salt: str,
@@ -331,6 +377,14 @@ def find_mcp_server(config: NexusConfig, query: str) -> NexusMcpServer | None:
     return None
 
 
+def find_remote_integration(config: NexusConfig, query: str) -> NexusRemoteIntegration | None:
+    needle = query.strip().lower()
+    for integration in config.remote_integrations:
+        if integration.id == query or integration.name.lower() == needle:
+            return integration
+    return None
+
+
 def add_account(config: NexusConfig, account: NexusAccount, activate: bool = True) -> None:
     config.accounts.append(account)
     if activate:
@@ -349,12 +403,24 @@ def add_mcp_server(config: NexusConfig, server: NexusMcpServer) -> None:
     config.mcp_servers.append(server)
 
 
+def add_remote_integration(config: NexusConfig, integration: NexusRemoteIntegration) -> None:
+    config.remote_integrations.append(integration)
+
+
 def remove_mcp_server(config: NexusConfig, server_query: str) -> NexusMcpServer:
     server = find_mcp_server(config, server_query)
     if server is None:
         raise ValueError(f"Servidor MCP nao encontrado: {server_query}")
     config.mcp_servers = [item for item in config.mcp_servers if item.id != server.id]
     return server
+
+
+def remove_remote_integration(config: NexusConfig, integration_query: str) -> NexusRemoteIntegration:
+    integration = find_remote_integration(config, integration_query)
+    if integration is None:
+        raise ValueError(f"Integracao remota nao encontrada: {integration_query}")
+    config.remote_integrations = [item for item in config.remote_integrations if item.id != integration.id]
+    return integration
 
 
 def ensure_agent_for_account(config: NexusConfig, account_id: str) -> NexusAgentProfile:
@@ -413,6 +479,16 @@ def normalize_config(config: NexusConfig) -> NexusConfig:
     for server in config.mcp_servers:
         server.name = server.name.strip() or "MCP"
         server.command = server.command.strip()
+    for integration in config.remote_integrations:
+        integration.name = integration.name.strip() or "Integracao remota"
+        integration.channel = normalize_remote_channel(integration.channel)
+        integration.command_prefix = (integration.command_prefix or "!nexus").strip() or "!nexus"
+        integration.allowed_senders = [item.strip() for item in (integration.allowed_senders or []) if item.strip()]
+        integration.settings = {
+            str(key): str(value).strip()
+            for key, value in (integration.settings or {}).items()
+            if str(value).strip()
+        }
 
     known_account_ids = {account.id for account in config.accounts}
     config.agents = [
@@ -471,6 +547,8 @@ def load_config() -> NexusConfig:
         agents=[NexusAgentProfile(**item) for item in payload.get("agents", [])],
         active_agent_id=payload.get("active_agent_id", ""),
         mcp_servers=[NexusMcpServer(**item) for item in payload.get("mcp_servers", [])],
+        remote_armed=bool(payload.get("remote_armed", False)),
+        remote_integrations=[NexusRemoteIntegration(**item) for item in payload.get("remote_integrations", [])],
     )
     return normalize_config(config)
 

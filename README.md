@@ -1,4 +1,4 @@
-# NEXUS AGENT v2.1
+# NEXUS AGENT v2.2
 
 <div align="center">
 
@@ -22,6 +22,7 @@ Inspirado no fluxo de trabalho do Codex e Claude Code — mas com cérebro de ve
 - [Por que usar](#por-que-usar)
 - [Recursos](#recursos)
 - [MCP](#mcp)
+- [Notebook + Bots Remotos](#notebook--bots-remotos)
 - [Arquitetura](#arquitetura)
 - [Instalação](#instalação)
 - [Uso](#uso)
@@ -93,11 +94,17 @@ Se quiser forçar um navegador específico, defina `NEXUS_BROWSER=chrome`, `chro
 - Dá para ter vários agentes nomeados, cada um preso a uma conta, com instruções extras próprias
 - O setup aceita `Outro / Custom` para providers com `Base URL / Endpoint` manual
 
+### 📓 Notebooks Jupyter
+- Criação e leitura de notebooks `.ipynb` direto pelo CLI
+- Adição de células de código ou markdown
+- Execução local via kernel `python3` com persistência do notebook atualizado
+- Ferramenta nativa `gerenciar_notebooks` para o agente operar notebooks automaticamente
+
 ## MCP
 
-O NEXUS AGENT `v2.1` adiciona suporte a **MCP (Model Context Protocol)** via `stdio`.
+Desde o `v2.1`, o NEXUS AGENT suporta **MCP (Model Context Protocol)** via `stdio`.
 
-### O que entra no v2.1
+### O que entrou no v2.1
 
 - Cadastro de servidores MCP no `config.json`
 - Comandos CLI para adicionar, listar, ler recursos e remover servidores MCP
@@ -125,16 +132,66 @@ nexus mcp tools filesystem
 nexus mcp remove filesystem
 ```
 
+## Notebook + Bots Remotos
+
+O `v2.2` adiciona **Notebook integration (Jupyter)** e uma camada de **automação remota por bots**, pensada para usar o Nexus pelo celular com Telegram ou WhatsApp.
+
+### O que entra no v2.2
+
+- Comandos CLI para criar, listar, ler, editar e executar notebooks `.ipynb`
+- Diretório padrão `~/.nexus/notebooks` para armazenar notebooks do agente
+- Ferramenta `gerenciar_notebooks` exposta ao LLM
+- Integração remota com **Telegram Bot API** via polling
+- Integração remota com **WhatsApp Cloud API** via webhook
+- Modo remoto com trava global `arm/disarm`
+- Allowlist de remetentes autorizados e prefixo obrigatório por integração
+
+### Comandos de Notebook
+
+```bash
+nexus notebook list
+nexus notebook create demos/analise --title "Análise inicial"
+nexus notebook add-cell demos/analise --type code --content "print('hello')"
+nexus notebook read demos/analise
+nexus notebook run demos/analise --timeout 300
+```
+
+### Comandos de Bots Remotos
+
+```bash
+# Telegram
+nexus remote add-telegram --name tg-pessoal --bot-token "TOKEN" --allow 123456789 --prefix "!nexus"
+
+# WhatsApp Cloud API
+nexus remote add-whatsapp --name wa-pessoal --access-token "TOKEN" --phone-number-id "ID" --verify-token "SEGREDO" --allow 5511999999999
+
+# Segurança do modo remoto
+nexus remote list
+nexus remote arm
+nexus remote start tg-pessoal
+nexus remote disarm
+```
+
+### Observações Importantes
+
+- O modo remoto fica **desarmado por padrão**
+- O Nexus só executa mensagens vindas de remetentes da allowlist
+- Cada integração exige um prefixo, como `!nexus abrir o VS Code`
+- No WhatsApp, o webhook precisa estar exposto publicamente em HTTP(S), por exemplo com reverse proxy ou túnel
+- A disponibilidade final no WhatsApp depende também da conta e das regras da plataforma Meta
+
 ---
 
 ## Arquitetura
 
 ```
-NEXUS AGENT v2.1
+NEXUS AGENT v2.2
 ├── core/
 │   ├── llm.py           # LiteLLMBridge + PlannerExecutor
 │   ├── actions.py       # AcoesAgente (ToolRegistry)
 │   ├── mcp.py           # Cliente MCP via stdio
+│   ├── notebooks.py     # Integração Jupyter / .ipynb
+│   ├── remote.py        # Telegram + WhatsApp remotos
 │   ├── tool_registry.py # Sistema dinâmico de ferramentas
 │   ├── safeguards.py    # Luz Verde (segurança)
 │   ├── memory.py        # Memória local persistente
@@ -303,6 +360,9 @@ nexus> Organize meus arquivos baixados separando PDFs, imagens e documentos
 | `/status` | Status do agente |
 | `/accounts` | Lista contas configuradas |
 | `/agents` | Lista agentes configurados |
+| `/mcp` | Lista servidores MCP |
+| `/notebooks` | Lista notebooks Jupyter |
+| `/remote` | Lista integrações remotas |
 | `/tools` | Lista ferramentas disponíveis |
 | `/memory` | Mostra memória local |
 | `/remember texto` | Salva memória manual |
@@ -324,6 +384,8 @@ Todas as ferramentas são **chamadas automaticamente** pelo LLM com base no cont
 | `controle_periferico` | Mouse/teclado/OCR | `acao: clicar\|digitar\|mover_mouse\|screenshot\|posicao_cursor`, `x?, y?, texto?` |
 | `memoria_local` | Memória persistente | `acao: salvar\|buscar\|limpar`, `texto?, consulta?` |
 | `verificar_pixel` | Lê cor RGB da tela | `x: int`, `y: int` |
+| `consultar_mcp` | Consulta servidores MCP | `acao, servidor?, uri?, ferramenta?, argumentos?` |
+| `gerenciar_notebooks` | Opera notebooks Jupyter | `acao, path?, content?, title?, kernel_name?, timeout?, cwd?` |
 
 ### Exemplos de Uso
 
@@ -409,6 +471,14 @@ Comandos são permitidos dentro de:
 - `/tmp`, `/var/tmp` (temp)
 - Diretório atual de trabalho (`pwd`)
 
+### Segurança do Modo Remoto
+
+- `nexus remote arm` libera a automação remota explicitamente
+- `nexus remote disarm` corta a execução remota imediatamente
+- Telegram e WhatsApp usam allowlist de IDs/números autorizados
+- Mensagens sem o prefixo configurado são ignoradas
+- O listener remoto também exige a senha mestra ao iniciar
+
 ---
 
 ## Comandos Principais
@@ -437,6 +507,22 @@ nexus mcp read srv "uri"       # Le recurso MCP
 nexus mcp tools srv            # Lista tools do servidor
 nexus mcp remove srv           # Remove servidor MCP
 
+# Notebooks Jupyter
+nexus notebook list
+nexus notebook create demo/analise --title "Analise"
+nexus notebook add-cell demo/analise --type code --content "print('oi')"
+nexus notebook read demo/analise
+nexus notebook run demo/analise --timeout 300
+
+# Bots remotos
+nexus remote list
+nexus remote add-telegram --name tg --bot-token "TOKEN" --allow 123456789
+nexus remote add-whatsapp --name wa --access-token "TOKEN" --phone-number-id "ID" --verify-token "SEGREDO" --allow 5511999999999
+nexus remote arm
+nexus remote start tg
+nexus remote disarm
+nexus remote remove tg
+
 # Ajuda e diagnóstico
 nexus --help                   # Ajuda do CLI
 nexus onboarding               # Tour guiado
@@ -461,12 +547,13 @@ O Nexus armazena tudo em `~/.nexus/`:
 
 | Arquivo | Descrição |
 |---------|-----------|
-| `config.json` | Contas, agentes, provider ativo, model, senha e servidores MCP |
+| `config.json` | Contas, agentes, provider ativo, model, senha, MCP e integrações remotas |
 | `history.json` | Histórico recente da conversa (últimas 24 mensagens) |
 | `memory.json` | Memória local persistente (até 200 itens) |
 | `activity.json` | Estado atual do agente |
 | `nexus.log` | Logs detalhados de ações |
 | `repo.txt` | URL do repositório (usado no `update`) |
+| `notebooks/` | Notebooks `.ipynb` criados pelo Nexus |
 
 ---
 
@@ -480,6 +567,8 @@ Nexus-Agent/
 │   │   ├── llm.py                 # LiteLLM + PlannerExecutor
 │   │   ├── actions.py             # AcoesAgente (ToolRegistry)
 │   │   ├── mcp.py                 # Cliente MCP
+│   │   ├── notebooks.py           # Integração Jupyter
+│   │   ├── remote.py              # Bots remotos
 │   │   ├── tool_registry.py       # Sistema de ferramentas
 │   │   ├── safeguards.py          # Segurança (Luz Verde)
 │   │   ├── memory.py              # Memória local
@@ -487,7 +576,7 @@ Nexus-Agent/
 │   │   ├── state.py               # Monitor de atividade
 │   │   └── logging_utils.py       # Logging
 │   ├── ui/
-│   │   ├── app.py                 # Interface Textual (v2.1)
+│   │   ├── app.py                 # Interface Textual (v2.2)
 │   │   ├── plain_cli.py           # CLI puro
 │   │   └── setup_cli.py           # Setup via terminal
 │   ├── pc_remote_agent/           # Automação de GUI
@@ -595,7 +684,7 @@ nexus uninstall
 - [x] v1.0 — UI Textual, ferramentas básicas, segurança
 - [x] v2.0 — Planner/Executor, Tool Registry, Modo Missão, Luz Verde real
 - [x] v2.1 — Suporte a MCP (Model Context Protocol)
-- [ ] v2.2 — Notebook integration (Jupyter)
+- [x] v2.2 — Notebook integration (Jupyter) + bots remotos (Telegram/WhatsApp)
 - [ ] v3.0 — Agentes múltiplos em paralelo
 
 ---

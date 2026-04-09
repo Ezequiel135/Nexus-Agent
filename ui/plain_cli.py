@@ -10,6 +10,7 @@ from core.config import NexusPaths
 from core.llm import LiteLLMBridge
 from core.logging_utils import log_event
 from core.memory import clear_memory, memory_summary, remember
+from core.notebooks import list_notebooks
 from core.safeguards import blocked_examples, blocked_reasons
 from core.state import ActivityMonitor
 
@@ -55,14 +56,14 @@ class PlainNexusCLI:
         self.console.print(
             Panel.fit(
                 "[bold green]NEXUS AGENT[/bold green]\n"
-                "[yellow]Modo plain estilo Codex/Claude Code | v2.1[/yellow]\n"
+                "[yellow]Modo plain estilo Codex/Claude Code | v2.2[/yellow]\n"
                 "[dim cyan]Criado por Ezequiel 135[/dim cyan]\n"
-                "[white]Shell + Files + Vision + Memory + Tool Use[/white]",
+                "[white]Shell + Files + Vision + Memory + MCP + Notebooks + Remote Bots[/white]",
                 border_style="bright_cyan",
             )
         )
         self.console.print(
-            "[dim]Dica: use /help, /accounts, /agents, /tools, /memory, /onboarding, /blocked e /exit[/dim]"
+            "[dim]Dica: use /help, /accounts, /agents, /mcp, /notebooks, /remote, /tools e /exit[/dim]"
         )
 
     def _handle_prompt(self, prompt: str) -> None:
@@ -93,6 +94,8 @@ class PlainNexusCLI:
             table.add_row("/accounts", "Lista contas configuradas")
             table.add_row("/agents", "Lista agentes configurados")
             table.add_row("/mcp", "Lista servidores MCP configurados")
+            table.add_row("/notebooks", "Lista notebooks Jupyter")
+            table.add_row("/remote", "Lista integracoes remotas")
             table.add_row("/tools", "Mostra as ferramentas locais que a IA sabe usar")
             table.add_row("/memory", "Mostra a memoria local salva")
             table.add_row("/remember texto", "Salva uma memoria local manualmente")
@@ -110,7 +113,9 @@ class PlainNexusCLI:
                     f"autonomous={snap.autonomous_mode}\n"
                     f"conta={(self.bridge.config.active_account.name if self.bridge.config.active_account else '-')}\n"
                     f"agente={(self.bridge.config.active_agent.name if self.bridge.config.active_agent else '-')}\n"
-                    f"mcp={len(self.bridge.config.mcp_servers)}",
+                    f"mcp={len(self.bridge.config.mcp_servers)}\n"
+                    f"notebooks_dir={NexusPaths.notebooks_dir}\n"
+                    f"remote={len(self.bridge.config.remote_integrations)} armed={self.bridge.config.remote_armed}",
                     title="Status",
                     border_style="yellow",
                 )
@@ -157,6 +162,38 @@ class PlainNexusCLI:
                 table.add_row(server.name, server.id, "on" if server.enabled else "off", server.command)
             if not self.bridge.config.mcp_servers:
                 self.console.print("[yellow]Nenhum servidor MCP configurado.[/yellow]")
+            else:
+                self.console.print(table)
+            return False
+        if command == "/notebooks":
+            notebooks = list_notebooks()
+            if not notebooks:
+                self.console.print("[yellow]Nenhum notebook encontrado.[/yellow]")
+                return False
+            table = Table(title="Notebooks Jupyter")
+            table.add_column("Arquivo", style="white")
+            table.add_column("Tamanho", style="cyan")
+            table.add_column("Atualizado", style="green")
+            for item in notebooks:
+                table.add_row(item["relative_path"], str(item["size_bytes"]), item["modified_at"])
+            self.console.print(table)
+            return False
+        if command == "/remote":
+            table = Table(title="Integracoes Remotas")
+            table.add_column("Nome", style="white")
+            table.add_column("Canal", style="cyan")
+            table.add_column("Prefixo", style="green")
+            table.add_column("Allowlist", style="yellow")
+            for integration in self.bridge.config.remote_integrations:
+                table.add_row(
+                    integration.name,
+                    integration.channel,
+                    integration.command_prefix,
+                    ", ".join(integration.allowed_senders) or "-",
+                )
+            self.console.print(f"[bold]{'ARMADO' if self.bridge.config.remote_armed else 'DESARMADO'}[/bold]")
+            if not self.bridge.config.remote_integrations:
+                self.console.print("[yellow]Nenhuma integracao remota configurada.[/yellow]")
             else:
                 self.console.print(table)
             return False

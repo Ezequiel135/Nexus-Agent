@@ -32,7 +32,7 @@ Write-Host "[5/6] Instalando dependencias Python"
 & (Join-Path $EnvDir "Scripts\python.exe") -m pip install -r (Join-Path $SrcDir "requirements.txt")
 if ($LASTEXITCODE -ne 0) {
     Write-Host "[WARN] requirements.txt completo falhou. Instalando conjunto minimo..."
-    & (Join-Path $EnvDir "Scripts\python.exe") -m pip install rich litellm requests python-dotenv psutil textual
+    & (Join-Path $EnvDir "Scripts\python.exe") -m pip install rich litellm requests python-dotenv psutil textual nbformat nbclient ipykernel
 }
 
 Write-Host "[6/6] Criando launcher do Windows"

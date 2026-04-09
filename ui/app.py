@@ -69,7 +69,7 @@ class NexusHeader(Static):
             "| . ` |  __|  /  \\  | | \\___ \\ \n"
             "| |\\  | |____/ /\\ \\_| |_ ____) |\n"
             "|_| \\_|______/_/  \\_\\_____|____/[/bold cyan]\n"
-            f"[bold green]NEXUS AGENT v2.1 — STATUS: [OPERACIONAL][/bold green]   [{color}]{dot}[/{color}]\n"
+            f"[bold green]NEXUS AGENT v2.2 — STATUS: [OPERACIONAL][/bold green]   [{color}]{dot}[/{color}]\n"
             "[dim cyan]Criado por Ezequiel 135[/dim cyan]"
         )
 
@@ -252,12 +252,12 @@ class NexusApp(App[None]):
         with Horizontal(id="body"):
             with Vertical(id="chat-panel"):
                 yield Static("Conversation", classes="panel-title")
-                yield Static("Descreva o objetivo. O agente usa shell, arquivos, tela, memoria e tools automaticamente.", classes="hint-box")
+                yield Static("Descreva o objetivo. O agente usa shell, arquivos, tela, memoria, MCP e notebooks automaticamente.", classes="hint-box")
                 yield RichLog(id="chat-log", markup=True, wrap=True)
                 yield Input(placeholder="Digite um objetivo ou comando para o Nexus...", id="prompt")
             with Vertical(id="log-panel"):
                 yield Static("Action & Log Panel", classes="panel-title")
-                yield Static("Comandos uteis: onboarding | blocked | update | accounts | agents | mcp", classes="hint-box")
+                yield Static("Comandos uteis: onboarding | blocked | update | accounts | agents | mcp | notebook | remote", classes="hint-box")
                 yield RichLog(id="action-log", markup=True, wrap=True)
         yield StatusBar(self.monitor, self.bridge.config)
         yield Footer()
@@ -266,7 +266,7 @@ class NexusApp(App[None]):
         self.bridge.actions.set_event_callback(lambda text: self.call_from_thread(self._write_log, text))
         self.conversation = self._load_history()
         ok, message = self.bridge.handshake()
-        self._write_chat("[bold green]NEXUS AGENT v2.1 ONLINE[/bold green]" if ok else f"[bold red]{message}[/bold red]")
+        self._write_chat("[bold green]NEXUS AGENT v2.2 ONLINE[/bold green]" if ok else f"[bold red]{message}[/bold red]")
         self._write_chat(
             "Use esta interface como um agente autonomo. "
             "Descreva um objetivo (ex: 'organiza minha pasta Downloads') e o NEXUS PLANEJA + EXECUTA."
@@ -278,6 +278,10 @@ class NexusApp(App[None]):
             self._write_log(f"Agente ativo: {self.bridge.config.active_agent.name}")
         if self.bridge.config.mcp_servers:
             self._write_log(f"MCP ativo: {len(self.bridge.config.mcp_servers)} servidor(es) configurado(s)")
+        if self.bridge.config.remote_integrations:
+            state = "ARMADO" if self.bridge.config.remote_armed else "DESARMADO"
+            self._write_log(f"Remote bots: {len(self.bridge.config.remote_integrations)} integracao(oes) | {state}")
+        self._write_log(f"Notebook root: {NexusPaths.notebooks_dir}")
         self._write_log("Modo Missao: decomposicao automatica de tarefas. Marca d'agua: Ezequiel 135")
         if self.initial_task:
             self.query_one("#prompt", Input).value = self.initial_task

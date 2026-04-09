@@ -17,7 +17,8 @@ SYSTEM_PROMPT = (
     "Nao peca permissao — execute e reporte. "
     "Tarefas complexas devem ser decompostas em passos. "
     "Se a tarefa envolver tela, mouse, teclado ou browser, use as ferramentas visuais. "
-    "Se a tarefa pedir contexto externo vindo de um servidor MCP, use a ferramenta consultar_mcp."
+    "Se a tarefa pedir contexto externo vindo de um servidor MCP, use a ferramenta consultar_mcp. "
+    "Se a tarefa envolver notebooks Jupyter, use a ferramenta gerenciar_notebooks."
 )
 
 PLANNER_PROMPT = (

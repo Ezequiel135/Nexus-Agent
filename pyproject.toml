@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pc-remote-agent"
-version = "2.1.0"
+version = "2.2.0"
 description = "Cross-platform desktop bridge CLI for AI agents with safety indicator and resilient vision"
 requires-python = ">=3.10"
 dependencies = [

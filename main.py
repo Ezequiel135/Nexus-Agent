@@ -19,12 +19,15 @@ from core.config import (
     add_account,
     add_agent,
     add_mcp_server,
+    add_remote_integration,
     config_exists,
     find_account,
     load_config,
     logout_account,
+    make_remote_integration,
     normalize_ui_mode,
     remove_mcp_server,
+    remove_remote_integration,
     save_config,
     slugify_name,
     unique_id,
@@ -32,9 +35,12 @@ from core.config import (
 )
 from core.llm import LiteLLMBridge
 from core.mcp import list_mcp_resources, list_mcp_servers, list_mcp_tools, read_mcp_resource
+from core.notebooks import append_cell, create_notebook, execute_notebook, list_notebooks, read_notebook
 from core.logging_utils import log_event
 from core.safeguards import blocked_examples, blocked_reasons
 from core.state import ActivityMonitor
+
+DEFAULT_WHATSAPP_GRAPH_VERSION = "v23.0"
 
 
 def import_ui_components(required: bool = False):
@@ -96,6 +102,50 @@ def build_parser() -> argparse.ArgumentParser:
     mcp_read.add_argument("uri", help="URI do recurso MCP")
     mcp_tools = mcp_sub.add_parser("tools", help="Lista ferramentas de um servidor MCP")
     mcp_tools.add_argument("server", help="Nome ou ID do servidor")
+    notebook = sub.add_parser("notebook", help="Gerencia notebooks Jupyter")
+    notebook_sub = notebook.add_subparsers(dest="notebook_command", required=True)
+    notebook_list = notebook_sub.add_parser("list", help="Lista notebooks .ipynb")
+    notebook_list.add_argument("--root", help="Diretorio raiz opcional para busca")
+    notebook_create = notebook_sub.add_parser("create", help="Cria um notebook")
+    notebook_create.add_argument("path", help="Caminho do notebook")
+    notebook_create.add_argument("--title", default="", help="Titulo inicial em markdown")
+    notebook_create.add_argument("--kernel", default="python3", help="Kernel Jupyter")
+    notebook_read = notebook_sub.add_parser("read", help="Lê um notebook")
+    notebook_read.add_argument("path", help="Caminho do notebook")
+    notebook_add = notebook_sub.add_parser("add-cell", help="Adiciona uma celula")
+    notebook_add.add_argument("path", help="Caminho do notebook")
+    notebook_add.add_argument("--type", choices=["code", "markdown"], default="code", help="Tipo da celula")
+    notebook_add.add_argument("--content", required=True, help="Conteudo da celula")
+    notebook_run = notebook_sub.add_parser("run", help="Executa um notebook")
+    notebook_run.add_argument("path", help="Caminho do notebook")
+    notebook_run.add_argument("--kernel", default="", help="Kernel opcional")
+    notebook_run.add_argument("--timeout", type=int, default=300, help="Timeout por celula em segundos")
+    notebook_run.add_argument("--cwd", default="", help="Diretorio de execucao opcional")
+    remote = sub.add_parser("remote", help="Gerencia integracoes remotas por bot")
+    remote_sub = remote.add_subparsers(dest="remote_command", required=True)
+    remote_sub.add_parser("list", help="Lista integracoes remotas")
+    remote_sub.add_parser("arm", help="Arma o modo remoto")
+    remote_sub.add_parser("disarm", help="Desarma o modo remoto")
+    remote_start = remote_sub.add_parser("start", help="Inicia o listener/polling remoto")
+    remote_start.add_argument("integration", help="Nome ou ID da integracao")
+    remote_start.add_argument("--host", default="127.0.0.1", help="Host para webhooks")
+    remote_start.add_argument("--port", type=int, default=8787, help="Porta para webhooks")
+    remote_remove = remote_sub.add_parser("remove", help="Remove uma integracao remota")
+    remote_remove.add_argument("integration", help="Nome ou ID da integracao")
+    remote_tg = remote_sub.add_parser("add-telegram", help="Adiciona um bot Telegram via polling")
+    remote_tg.add_argument("--name", required=True, help="Nome da integracao")
+    remote_tg.add_argument("--bot-token", required=True, help="Token do bot Telegram")
+    remote_tg.add_argument("--allow", action="append", required=True, help="Chat ID ou user ID autorizado")
+    remote_tg.add_argument("--prefix", default="!nexus", help="Prefixo exigido na mensagem")
+    remote_tg.add_argument("--poll-timeout", type=int, default=30, help="Timeout de polling em segundos")
+    remote_wa = remote_sub.add_parser("add-whatsapp", help="Adiciona um webhook WhatsApp Cloud API")
+    remote_wa.add_argument("--name", required=True, help="Nome da integracao")
+    remote_wa.add_argument("--access-token", required=True, help="Access token do Meta Graph")
+    remote_wa.add_argument("--phone-number-id", required=True, help="Phone Number ID do WhatsApp")
+    remote_wa.add_argument("--verify-token", required=True, help="Verify token do webhook")
+    remote_wa.add_argument("--allow", action="append", required=True, help="Numero/ID autorizado")
+    remote_wa.add_argument("--prefix", default="!nexus", help="Prefixo exigido na mensagem")
+    remote_wa.add_argument("--graph-version", default=DEFAULT_WHATSAPP_GRAPH_VERSION, help="Versao do Graph API")
     sub.add_parser("uninstall", help="Remove a instalacao local do NEXUS AGENT")
     sub.add_parser("update", help="Atualiza o NEXUS AGENT via git pull")
     return parser
@@ -124,6 +174,7 @@ def handle_doctor() -> int:
     print(f"repo_file={NexusPaths.repo_path}")
     print(f"activity_file={NexusPaths.activity_path}")
     print(f"memory_file={NexusPaths.memory_path}")
+    print(f"notebooks_dir={NexusPaths.notebooks_dir}")
     print(f"local_launcher={Path.home() / '.local/bin/nexus'}")
     print(f"global_launcher=/usr/local/bin/nexus")
     if config is not None:
@@ -132,6 +183,7 @@ def handle_doctor() -> int:
         print(f"accounts={len(config.accounts)} active_account={active_account}")
         print(f"agents={len(config.agents)} active_agent={active_agent}")
         print(f"mcp_servers={len(config.mcp_servers)}")
+        print(f"remote_integrations={len(config.remote_integrations)} armed={config.remote_armed}")
     return 0
 
 
@@ -350,6 +402,148 @@ def handle_mcp(args) -> int:
     return 0
 
 
+def handle_notebook(args) -> int:
+    try:
+        if args.notebook_command == "list":
+            items = list_notebooks(args.root)
+            if not items:
+                print("Nenhum notebook encontrado.")
+                return 0
+            print("Notebooks Jupyter:\n")
+            for item in items:
+                print(f"- {item['relative_path']} | {item['size_bytes']} bytes | atualizado {item['modified_at']}")
+            return 0
+        if args.notebook_command == "create":
+            payload = create_notebook(args.path, title=args.title, kernel_name=args.kernel)
+            print(f"Notebook criado: {payload['path']}")
+            return 0
+        if args.notebook_command == "read":
+            payload = read_notebook(args.path)
+            print(json.dumps(payload, indent=2, ensure_ascii=False))
+            return 0
+        if args.notebook_command == "add-cell":
+            cell_type = "markdown" if args.type == "markdown" else "code"
+            payload = append_cell(args.path, args.content, cell_type=cell_type)
+            print(f"Celula {payload['cell_type']} adicionada em {payload['path']}")
+            return 0
+        if args.notebook_command == "run":
+            payload = execute_notebook(
+                args.path,
+                kernel_name=args.kernel,
+                timeout=args.timeout,
+                cwd=args.cwd,
+            )
+            print(json.dumps(payload, indent=2, ensure_ascii=False))
+            return 0
+    except Exception as exc:
+        print(f"Erro notebook: {exc}")
+        return 1
+    return 0
+
+
+def handle_remote(args) -> int:
+    try:
+        from core.remote import list_remote_integrations, run_remote_integration
+    except ImportError as exc:
+        print("Dependencias remotas nao instaladas. Rode pip install -r requirements.txt")
+        print(f"Detalhe: {exc}")
+        return 1
+
+    if not config_exists():
+        print("Nenhuma configuracao encontrada. Rode nexus setup primeiro.")
+        return 1
+
+    config = load_config()
+    if args.remote_command == "list":
+        print(f"Modo remoto: {'ARMADO' if config.remote_armed else 'DESARMADO'}")
+        items = list_remote_integrations(config)
+        if not items:
+            print("Nenhuma integracao remota configurada.")
+            return 0
+        print("\nIntegracoes remotas:\n")
+        for item in items:
+            status = "on" if item["enabled"] else "off"
+            allowed = ", ".join(item["allowed_senders"]) or "-"
+            print(
+                f"- {item['name']} [{item['id']}] | canal={item['channel']} | {status} | "
+                f"prefixo={item['command_prefix']} | allow={allowed}"
+            )
+        return 0
+
+    if args.remote_command == "arm":
+        config.remote_armed = True
+        save_config(config)
+        print("Modo remoto armado.")
+        return 0
+
+    if args.remote_command == "disarm":
+        config.remote_armed = False
+        save_config(config)
+        print("Modo remoto desarmado.")
+        return 0
+
+    if args.remote_command == "add-telegram":
+        integration = make_remote_integration(
+            args.name,
+            "telegram",
+            command_prefix=args.prefix,
+            allowed_senders=args.allow,
+            settings={
+                "bot_token": args.bot_token,
+                "poll_timeout": str(args.poll_timeout),
+            },
+            existing_ids={item.id for item in config.remote_integrations},
+        )
+        add_remote_integration(config, integration)
+        save_config(config)
+        print(f"Integracao Telegram adicionada: {integration.name}")
+        return 0
+
+    if args.remote_command == "add-whatsapp":
+        integration = make_remote_integration(
+            args.name,
+            "whatsapp",
+            command_prefix=args.prefix,
+            allowed_senders=args.allow,
+            settings={
+                "access_token": args.access_token,
+                "phone_number_id": args.phone_number_id,
+                "verify_token": args.verify_token,
+                "graph_version": args.graph_version,
+            },
+            existing_ids={item.id for item in config.remote_integrations},
+        )
+        add_remote_integration(config, integration)
+        save_config(config)
+        print(f"Integracao WhatsApp adicionada: {integration.name}")
+        return 0
+
+    if args.remote_command == "remove":
+        try:
+            integration = remove_remote_integration(config, args.integration)
+        except ValueError as exc:
+            print(str(exc))
+            return 1
+        save_config(config)
+        print(f"Integracao removida: {integration.name}")
+        return 0
+
+    if args.remote_command == "start":
+        password = password_gate("Nexus Password (remote): ")
+        if not verify_password(password, config.password_hash, config.password_salt):
+            print("Senha invalida.")
+            return 1
+        os.environ["AUTONOMOUS_MODE"] = "1"
+        try:
+            run_remote_integration(config, args.integration, host=args.host, port=args.port)
+        except Exception as exc:
+            print(f"Erro remoto: {exc}")
+            return 1
+        return 0
+
+    return 0
+
+
 def ensure_config(force_setup: bool = False) -> None:
     if force_setup or not config_exists():
         _, SetupApp = import_ui_components(required=False)
@@ -478,6 +672,10 @@ def main(argv: list[str] | None = None) -> int:
         return handle_use_agent(args.agent)
     if args.command == "mcp":
         return handle_mcp(args)
+    if args.command == "notebook":
+        return handle_notebook(args)
+    if args.command == "remote":
+        return handle_remote(args)
     if args.command == "blocked":
         return handle_blocked()
     if args.command == "doctor":

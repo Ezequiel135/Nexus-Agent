@@ -4,6 +4,9 @@ rich
 pyautogui
 python-dotenv
 requests
+nbformat
+nbclient
+ipykernel
 mss
 Pillow
 pytesseract

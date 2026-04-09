@@ -127,6 +127,37 @@ class AcoesAgente(ToolRegistry):
             },
             func=self.consultar_mcp,
         )
+        self.register(
+            name="gerenciar_notebooks",
+            description=(
+                "Cria, lista, le, adiciona celulas e executa notebooks Jupyter (.ipynb) no host local. "
+                "Use quando a tarefa envolver analise, prototipos em Python ou integracao com Jupyter."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "acao": {
+                        "type": "string",
+                        "enum": [
+                            "listar",
+                            "criar",
+                            "ler",
+                            "adicionar_codigo",
+                            "adicionar_markdown",
+                            "executar",
+                        ],
+                    },
+                    "path": {"type": "string"},
+                    "content": {"type": "string"},
+                    "title": {"type": "string"},
+                    "kernel_name": {"type": "string"},
+                    "timeout": {"type": "integer"},
+                    "cwd": {"type": "string"},
+                },
+                "required": ["acao"],
+            },
+            func=self.gerenciar_notebooks,
+        )
 
     def dispatch_tool(self, name: str, arguments: dict[str, Any]) -> str:
         return self.executar(name, arguments)
@@ -282,3 +313,53 @@ class AcoesAgente(ToolRegistry):
             payload = call_mcp_tool(self.config, servidor, ferramenta, argumentos or {})
             return json.dumps({"ok": True, **payload}, ensure_ascii=False)
         raise ValueError(f"Acao MCP desconhecida: {acao}")
+
+    def gerenciar_notebooks(
+        self,
+        acao: str,
+        path: str | None = None,
+        content: str | None = None,
+        title: str | None = None,
+        kernel_name: str | None = None,
+        timeout: int | None = None,
+        cwd: str | None = None,
+    ) -> str:
+        from .notebooks import append_cell, create_notebook, execute_notebook, list_notebooks, read_notebook
+
+        line = log_event("NOTEBOOK", f"{acao} {path or '-'}")
+        self._emit(line)
+
+        if acao == "listar":
+            payload = list_notebooks(path or None)
+            return json.dumps({"ok": True, "notebooks": payload}, ensure_ascii=False)
+        if acao == "criar":
+            if not path:
+                return json.dumps({"ok": False, "erro": "path e obrigatorio"}, ensure_ascii=False)
+            payload = create_notebook(path, title=title or "", kernel_name=(kernel_name or "").strip() or "python3")
+            return json.dumps(payload, ensure_ascii=False)
+        if acao == "ler":
+            if not path:
+                return json.dumps({"ok": False, "erro": "path e obrigatorio"}, ensure_ascii=False)
+            payload = read_notebook(path)
+            return json.dumps(payload, ensure_ascii=False)
+        if acao == "adicionar_codigo":
+            if not path or content is None:
+                return json.dumps({"ok": False, "erro": "path e content sao obrigatorios"}, ensure_ascii=False)
+            payload = append_cell(path, content, cell_type="code")
+            return json.dumps(payload, ensure_ascii=False)
+        if acao == "adicionar_markdown":
+            if not path or content is None:
+                return json.dumps({"ok": False, "erro": "path e content sao obrigatorios"}, ensure_ascii=False)
+            payload = append_cell(path, content, cell_type="markdown")
+            return json.dumps(payload, ensure_ascii=False)
+        if acao == "executar":
+            if not path:
+                return json.dumps({"ok": False, "erro": "path e obrigatorio"}, ensure_ascii=False)
+            payload = execute_notebook(
+                path,
+                kernel_name=(kernel_name or "").strip(),
+                timeout=int(timeout or 300),
+                cwd=(cwd or "").strip(),
+            )
+            return json.dumps(payload, ensure_ascii=False)
+        raise ValueError(f"Acao de notebook desconhecida: {acao}")
