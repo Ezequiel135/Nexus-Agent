@@ -1,4 +1,4 @@
-# NEXUS AGENT 26.1.1
+# NEXUS AGENT 26.1.2
 
 <div align="center">
 
@@ -57,7 +57,7 @@ Diferente de assistentes que só respondem, o Nexus **planeja, age e reporta**. 
 - **Capacidades:** shell, arquivos, OCR, mouse, teclado, memória, MCP, notebooks e bots remotos.
 - **Escala:** múltiplas contas, múltiplos agentes e execução paralela.
 - **Segurança:** comandos avaliados por Luz Verde antes da execução.
-- **Versão atual:** `26.1.1`, com versionamento CalVer.
+- **Versão atual:** `26.1.2`, com versionamento CalVer.
 
 ### Quick Start
 
@@ -137,9 +137,9 @@ Se quiser forçar um navegador específico, defina `NEXUS_BROWSER=chrome`, `chro
 
 ## MCP
 
-Na linha `26.1.1`, o NEXUS AGENT suporta **MCP (Model Context Protocol)** via `stdio`.
+Na linha `26.1.2`, o NEXUS AGENT suporta **MCP (Model Context Protocol)** via `stdio`.
 
-### MCP na versão 26.1.1
+### MCP na versão 26.1.2
 
 - Cadastro de servidores MCP no `config.json`
 - Comandos CLI para adicionar, listar, ler recursos e remover servidores MCP
@@ -169,9 +169,9 @@ nexus mcp remove filesystem
 
 ## Notebook + Bots Remotos
 
-A versão `26.1.1` mantém **Notebook integration (Jupyter)**, **automação remota por bots** e **agentes múltiplos em paralelo**, com foco nesta release em corrigir a UI inicial de configuração.
+A versão `26.1.2` mantém **Notebook integration (Jupyter)**, **automação remota por bots** e **agentes múltiplos em paralelo**, com foco nesta release em corrigir de forma mais agressiva a UI inicial de configuração.
 
-### O que entra na 26.1.1
+### O que entra na 26.1.2
 
 - UI inicial de configuração refeita do zero, com layout responsivo, rolagem e foco correto
 - Campos de texto e navegação do setup ajustados para evitar travamentos
@@ -223,7 +223,7 @@ nexus remote disarm
 ## Arquitetura
 
 ```
-NEXUS AGENT 26.1.1
+NEXUS AGENT 26.1.2
 ├── core/
 │   ├── llm.py           # LiteLLMBridge + PlannerExecutor
 │   ├── actions.py       # AcoesAgente (ToolRegistry)

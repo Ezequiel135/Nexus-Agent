@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from rich.markdown import Markdown
 from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal, Vertical, VerticalScroll
-from textual.widgets import Button, Footer, Input, RichLog, Select, Static
+from textual.widgets import Button, Footer, Input, RichLog, Static
 
 from core.actions import AcoesAgente
 from core.config import (
@@ -133,6 +133,23 @@ class SetupApp(App[SetupPayload | None]):
         color: #a8c7d8;
         margin-top: 1;
     }
+    #setup-feedback {
+        border: round #244b63;
+        background: #0c1c28;
+        color: #d9efff;
+        padding: 1;
+        margin-top: 1;
+    }
+    #setup-feedback.-error {
+        border: round #9f3d47;
+        background: #2b1116;
+        color: #ffd9dd;
+    }
+    #setup-feedback.-success {
+        border: round #28785c;
+        background: #0f241d;
+        color: #dffff2;
+    }
     #setup-live-status {
         border: round #244b63;
         background: #0c1c28;
@@ -169,15 +186,18 @@ class SetupApp(App[SetupPayload | None]):
         margin-bottom: 1;
         min-height: 3;
     }
-    Input, Select {
+    Input {
         width: 1fr;
         color: #ffffff;
         background: #112231;
         border: round #27536b;
     }
-    Input:focus, Select:focus {
+    Input:focus {
         background: #183346;
         border: round #2ee6a6;
+    }
+    Input > .input--placeholder {
+        color: #7f9fb4;
     }
     #custom-provider-wrap {
         margin-top: 1;
@@ -214,21 +234,20 @@ class SetupApp(App[SetupPayload | None]):
         ("ctrl+c", "quit", "Sair"),
     ]
 
-    def __init__(self) -> None:
-        super().__init__()
-        self._provider_autofocus_enabled = False
-
     def compose(self) -> ComposeResult:
-        provider_options = [(("Outro / Custom" if provider == "Custom" else provider), provider) for provider in KNOWN_PROVIDERS]
         with VerticalScroll(id="setup-shell"):
             with Container(id="setup-card"):
                 with Container(id="setup-hero"):
                     yield Static(f"NEXUS AGENT {APP_VERSION}", classes="setup-brand")
                     yield Static("Configuracao Inicial", classes="setup-title")
                     yield Static(
-                        "Formulario redesenhado para funcionar melhor em qualquer terminal: "
-                        "sem largura fixa, com rolagem e com foco previsivel em todos os campos.",
+                        "Setup simplificado para evitar travamentos: apenas campos de texto, "
+                        "rolagem responsiva e validacao direta.",
                         classes="setup-lead",
+                    )
+                    yield Static(
+                        "Digite os valores e use Tab para navegar. Sem menus flutuantes e sem overlay de selecao.",
+                        id="setup-feedback",
                     )
                     yield Static("", id="setup-live-status")
 
@@ -239,16 +258,8 @@ class SetupApp(App[SetupPayload | None]):
                         classes="setup-section-help",
                     )
                     yield Static("Interface inicial", classes="setup-label")
-                    yield Static("Escolha entre interface visual completa ou terminal puro.", classes="setup-hint")
-                    yield Select(
-                        [
-                            ("Visual completa", "visual"),
-                            ("Terminal puro", "plain"),
-                        ],
-                        value="visual",
-                        id="ui_mode",
-                        classes="field",
-                    )
+                    yield Static("Valores aceitos: visual ou plain.", classes="setup-hint")
+                    yield Input(value="visual", placeholder="visual ou plain", id="ui_mode", classes="field")
                     yield Static("Nome da conta", classes="setup-label")
                     yield Static("Exemplo: Conta principal, Trabalho, Cliente X.", classes="setup-hint")
                     yield Input(value="Conta principal", id="account_name", classes="field")
@@ -261,16 +272,21 @@ class SetupApp(App[SetupPayload | None]):
                         classes="setup-section-help",
                     )
                     yield Static("Provider", classes="setup-label")
-                    yield Static("Escolha o provedor principal da conta.", classes="setup-hint")
-                    yield Select(provider_options, value="OpenAI", id="provider", classes="field")
+                    yield Static(
+                        "Valores comuns: OpenAI, Anthropic, Google, Ollama, Groq ou Custom.",
+                        classes="setup-hint",
+                    )
+                    yield Input(
+                        value="OpenAI",
+                        placeholder="OpenAI / Anthropic / Google / Ollama / Groq / Custom",
+                        id="provider",
+                        classes="field",
+                    )
                     with Container(id="custom-provider-wrap", classes="setup-section"):
                         yield Static("Provider custom", classes="setup-section-title")
                         yield Static("Obrigatorio apenas quando o provider for Outro / Custom.", classes="setup-section-help")
                         yield Static("Nome/ID do provider custom", classes="setup-label")
-                        yield Static(
-                            "Exemplos: openrouter, azure, provider-interno.",
-                            classes="setup-hint",
-                        )
+                        yield Static("Exemplos: openrouter, azure, provider-interno.", classes="setup-hint")
                         yield Input(
                             placeholder="openrouter / azure / provider interno",
                             id="custom_provider",
@@ -281,19 +297,12 @@ class SetupApp(App[SetupPayload | None]):
                         "Opcional para providers padrao e obrigatorio para provider custom.",
                         classes="setup-hint",
                     )
-                    yield Input(
-                        placeholder="https://api.exemplo.com/v1",
-                        id="base_url",
-                        classes="field",
-                    )
+                    yield Input(placeholder="https://api.exemplo.com/v1", id="base_url", classes="field")
                     yield Static("API Key", classes="setup-label")
                     yield Static("Cole somente a chave da conta neste campo.", classes="setup-hint")
-                    yield Input(password=True, id="api_key", classes="field")
+                    yield Input(password=True, placeholder="sk-...", id="api_key", classes="field")
                     yield Static("Modelo", classes="setup-label")
-                    yield Static(
-                        "Exemplos: gpt-4o-mini, claude-3-5-sonnet, llama3.",
-                        classes="setup-hint",
-                    )
+                    yield Static("Exemplos: gpt-4o-mini, claude-3-5-sonnet, llama3.", classes="setup-hint")
                     yield Input(
                         placeholder="gpt-4o-mini / claude-3-5-sonnet / llama3",
                         id="model_name",
@@ -325,7 +334,7 @@ class SetupApp(App[SetupPayload | None]):
                     )
                     yield Static("Senha mestra do Nexus", classes="setup-label")
                     yield Static("Use uma senha que voce consiga lembrar com seguranca.", classes="setup-hint")
-                    yield Input(password=True, id="password", classes="field")
+                    yield Input(password=True, placeholder="Sua senha mestra", id="password", classes="field")
 
                 with Horizontal(id="setup-actions"):
                     yield Button("Resetar campos", id="reset_setup")
@@ -340,19 +349,15 @@ class SetupApp(App[SetupPayload | None]):
     def on_mount(self) -> None:
         self._toggle_custom_provider_fields()
         self._update_setup_summary()
-        self.call_after_refresh(self._finish_initial_setup)
-
-    def _finish_initial_setup(self) -> None:
-        self._focus_setup_input()
-        self._provider_autofocus_enabled = True
+        self.call_after_refresh(self._focus_setup_input)
 
     def action_submit_setup(self) -> None:
         self._submit_setup()
 
     def action_reset_setup(self) -> None:
-        self.query_one("#ui_mode", Select).value = "visual"
+        self.query_one("#ui_mode", Input).value = "visual"
         self.query_one("#account_name", Input).value = "Conta principal"
-        self.query_one("#provider", Select).value = "OpenAI"
+        self.query_one("#provider", Input).value = "OpenAI"
         self.query_one("#custom_provider", Input).value = ""
         self.query_one("#base_url", Input).value = ""
         self.query_one("#api_key", Input).value = ""
@@ -362,18 +367,11 @@ class SetupApp(App[SetupPayload | None]):
         self.query_one("#password", Input).value = ""
         self._toggle_custom_provider_fields()
         self._update_setup_summary()
+        self._set_feedback("Formulario resetado. Digite novamente os valores.", "info")
         self._focus_setup_input()
-        self.notify("Formulario resetado.", title="Setup", severity="information")
-
-    def on_select_changed(self, event: Select.Changed) -> None:
-        if event.select.id == "provider":
-            self._toggle_custom_provider_fields()
-            if self._provider_autofocus_enabled:
-                next_field = "custom_provider" if normalize_provider(str(event.value or "OpenAI")) == "Custom" else "api_key"
-                self.call_after_refresh(self._focus_field, next_field)
-        self._update_setup_summary()
 
     def on_input_changed(self, _event: Input.Changed) -> None:
+        self._toggle_custom_provider_fields()
         self._update_setup_summary()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
@@ -384,14 +382,24 @@ class SetupApp(App[SetupPayload | None]):
             self.action_reset_setup()
 
     def _focus_setup_input(self) -> None:
-        self._focus_field("account_name")
+        self._focus_field("ui_mode")
 
     def _focus_field(self, field_id: str) -> None:
         self.query_one(f"#{field_id}").focus()
 
     def _toggle_custom_provider_fields(self) -> None:
-        provider = str(self.query_one("#provider", Select).value or "OpenAI")
+        provider = self.query_one("#provider", Input).value or "OpenAI"
         self.query_one("#custom-provider-wrap", Container).display = normalize_provider(provider) == "Custom"
+
+    def _set_feedback(self, message: str, level: str = "info") -> None:
+        feedback = self.query_one("#setup-feedback", Static)
+        feedback.update(message)
+        feedback.remove_class("-error")
+        feedback.remove_class("-success")
+        if level == "error":
+            feedback.add_class("-error")
+        elif level == "success":
+            feedback.add_class("-success")
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         if event.input.id != "password":
@@ -401,6 +409,7 @@ class SetupApp(App[SetupPayload | None]):
 
     def _visible_setup_order(self) -> list[str]:
         order = [
+            "ui_mode",
             "account_name",
             "provider",
             "custom_provider",
@@ -412,7 +421,7 @@ class SetupApp(App[SetupPayload | None]):
             "password",
             "submit_setup",
         ]
-        if normalize_provider(str(self.query_one("#provider", Select).value or "OpenAI")) != "Custom":
+        if normalize_provider(self.query_one("#provider", Input).value or "OpenAI") != "Custom":
             order.remove("custom_provider")
         return order
 
@@ -425,23 +434,28 @@ class SetupApp(App[SetupPayload | None]):
             self._focus_field(order[index + 1])
 
     def _update_setup_summary(self) -> None:
-        ui_mode = str(self.query_one("#ui_mode", Select).value or "visual")
-        provider = str(self.query_one("#provider", Select).value or "OpenAI")
+        ui_mode = self.query_one("#ui_mode", Input).value.strip().lower() or "visual"
+        provider = self.query_one("#provider", Input).value.strip() or "OpenAI"
         custom_provider = self.query_one("#custom_provider", Input).value.strip()
         provider_label = custom_provider if normalize_provider(provider) == "Custom" and custom_provider else provider
         account_name = self.query_one("#account_name", Input).value.strip() or "Conta principal"
         agent_name = self.query_one("#agent_name", Input).value.strip() or "Agente principal"
         model_name = self.query_one("#model_name", Input).value.strip() or "defina um modelo"
-        ui_label = "Visual completa" if ui_mode == "visual" else "Terminal puro"
+        if ui_mode == "visual":
+            ui_label = "Visual completa"
+        elif ui_mode == "plain":
+            ui_label = "Terminal puro"
+        else:
+            ui_label = ui_mode
         self.query_one("#setup-live-status", Static).update(
             f"UI: {ui_label} | Conta: {account_name} | Agente: {agent_name} | "
             f"Provider: {provider_label} | Modelo: {model_name}"
         )
 
     def _submit_setup(self) -> None:
-        ui_mode = str(self.query_one("#ui_mode", Select).value or "visual")
+        ui_mode = self.query_one("#ui_mode", Input).value.strip().lower() or "visual"
         account_name = self.query_one("#account_name", Input).value.strip() or "Conta principal"
-        provider = str(self.query_one("#provider", Select).value or "OpenAI")
+        provider = self.query_one("#provider", Input).value.strip() or "OpenAI"
         custom_provider = self.query_one("#custom_provider", Input).value.strip()
         base_url = self.query_one("#base_url", Input).value.strip()
         api_key = self.query_one("#api_key", Input).value.strip()
@@ -450,24 +464,28 @@ class SetupApp(App[SetupPayload | None]):
         agent_prompt = self.query_one("#agent_prompt", Input).value.strip()
         password = self.query_one("#password", Input).value.strip()
 
+        if ui_mode not in {"visual", "plain"}:
+            self._set_feedback("Campo Interface inicial aceita apenas: visual ou plain.", "error")
+            self._focus_field("ui_mode")
+            return
         if not api_key:
-            self.notify("Informe a API Key da conta.", title="Setup incompleto", severity="error")
+            self._set_feedback("Informe a API Key da conta.", "error")
             self._focus_field("api_key")
             return
         if not model_name:
-            self.notify("Informe o modelo principal da conta.", title="Setup incompleto", severity="error")
+            self._set_feedback("Informe o modelo principal da conta.", "error")
             self._focus_field("model_name")
             return
         if not password:
-            self.notify("Informe a senha mestra do Nexus.", title="Setup incompleto", severity="error")
+            self._set_feedback("Informe a senha mestra do Nexus.", "error")
             self._focus_field("password")
             return
         if normalize_provider(provider) == "Custom" and not custom_provider:
-            self.notify("Provider custom exige Nome/ID do provider.", title="Setup incompleto", severity="error")
+            self._set_feedback("Provider custom exige Nome/ID do provider.", "error")
             self._focus_field("custom_provider")
             return
         if normalize_provider(provider) == "Custom" and not base_url:
-            self.notify("Provider custom exige Base URL / Endpoint.", title="Setup incompleto", severity="error")
+            self._set_feedback("Provider custom exige Base URL / Endpoint.", "error")
             self._focus_field("base_url")
             return
 
@@ -485,8 +503,8 @@ class SetupApp(App[SetupPayload | None]):
             account_id=account.id,
             system_prompt=agent_prompt,
         )
-        save_config(build_initial_config(password_hash, salt, str(ui_mode), account, agent))
-        self.notify("Configuracao salva com sucesso.", title="Setup", severity="information")
+        save_config(build_initial_config(password_hash, salt, ui_mode, account, agent))
+        self._set_feedback("Configuracao salva com sucesso. Fechando setup...", "success")
         self.exit(SetupPayload(ui_mode, account_name, provider, model_name, agent_name, password))
 
 

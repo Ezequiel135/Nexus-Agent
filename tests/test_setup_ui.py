@@ -4,7 +4,7 @@ from unittest import IsolatedAsyncioTestCase
 from unittest.mock import patch
 
 from textual.containers import Container
-from textual.widgets import Input, Select
+from textual.widgets import Input
 
 from ui.app import SetupApp
 
@@ -16,9 +16,9 @@ class SetupUiTests(IsolatedAsyncioTestCase):
         async with app.run_test(size=(52, 18)) as pilot:
             await pilot.pause()
             self.assertIsNotNone(app.focused)
-            self.assertEqual(app.focused.id, "account_name")
+            self.assertEqual(app.focused.id, "ui_mode")
 
-            provider = app.query_one("#provider", Select)
+            provider = app.query_one("#provider", Input)
             provider.value = "Custom"
             await pilot.pause()
 
