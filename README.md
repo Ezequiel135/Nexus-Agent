@@ -1,4 +1,4 @@
-# NEXUS AGENT v2.0
+# NEXUS AGENT v2.1
 
 <div align="center">
 
@@ -21,6 +21,7 @@ Inspirado no fluxo de trabalho do Codex e Claude Code — mas com cérebro de ve
 - [O que é](#o-que-é)
 - [Por que usar](#por-que-usar)
 - [Recursos](#recursos)
+- [MCP](#mcp)
 - [Arquitetura](#arquitetura)
 - [Instalação](#instalação)
 - [Uso](#uso)
@@ -92,15 +93,48 @@ Se quiser forçar um navegador específico, defina `NEXUS_BROWSER=chrome`, `chro
 - Dá para ter vários agentes nomeados, cada um preso a uma conta, com instruções extras próprias
 - O setup aceita `Outro / Custom` para providers com `Base URL / Endpoint` manual
 
+## MCP
+
+O NEXUS AGENT `v2.1` adiciona suporte a **MCP (Model Context Protocol)** via `stdio`.
+
+### O que entra no v2.1
+
+- Cadastro de servidores MCP no `config.json`
+- Comandos CLI para adicionar, listar, ler recursos e remover servidores MCP
+- Ferramenta nativa `consultar_mcp` para o agente buscar contexto via MCP
+
+### Comandos MCP
+
+```bash
+# Lista servidores MCP cadastrados
+nexus mcp list
+
+# Adiciona um servidor MCP
+nexus mcp add --name filesystem --command "npx -y @modelcontextprotocol/server-filesystem ~/projeto"
+
+# Lista recursos publicados pelo servidor
+nexus mcp resources filesystem
+
+# Lê um recurso MCP
+nexus mcp read filesystem "file:///home/user/projeto/README.md"
+
+# Lista tools publicadas pelo servidor
+nexus mcp tools filesystem
+
+# Remove o servidor
+nexus mcp remove filesystem
+```
+
 ---
 
 ## Arquitetura
 
 ```
-NEXUS AGENT v2.0
+NEXUS AGENT v2.1
 ├── core/
 │   ├── llm.py           # LiteLLMBridge + PlannerExecutor
 │   ├── actions.py       # AcoesAgente (ToolRegistry)
+│   ├── mcp.py           # Cliente MCP via stdio
 │   ├── tool_registry.py # Sistema dinâmico de ferramentas
 │   ├── safeguards.py    # Luz Verde (segurança)
 │   ├── memory.py        # Memória local persistente
@@ -395,6 +429,14 @@ nexus add-agent                # Cria um novo agente
 nexus add-agent --account "Conta"  # Cria agente preso a uma conta especifica
 nexus use-agent "Agente"       # Ativa um agente existente
 
+# MCP
+nexus mcp list                 # Lista servidores MCP
+nexus mcp add --name srv --command "comando"
+nexus mcp resources srv        # Lista recursos do servidor
+nexus mcp read srv "uri"       # Le recurso MCP
+nexus mcp tools srv            # Lista tools do servidor
+nexus mcp remove srv           # Remove servidor MCP
+
 # Ajuda e diagnóstico
 nexus --help                   # Ajuda do CLI
 nexus onboarding               # Tour guiado
@@ -419,7 +461,7 @@ O Nexus armazena tudo em `~/.nexus/`:
 
 | Arquivo | Descrição |
 |---------|-----------|
-| `config.json` | Contas, agentes, provider ativo, model e senha |
+| `config.json` | Contas, agentes, provider ativo, model, senha e servidores MCP |
 | `history.json` | Histórico recente da conversa (últimas 24 mensagens) |
 | `memory.json` | Memória local persistente (até 200 itens) |
 | `activity.json` | Estado atual do agente |
@@ -437,6 +479,7 @@ Nexus-Agent/
 │   ├── core/
 │   │   ├── llm.py                 # LiteLLM + PlannerExecutor
 │   │   ├── actions.py             # AcoesAgente (ToolRegistry)
+│   │   ├── mcp.py                 # Cliente MCP
 │   │   ├── tool_registry.py       # Sistema de ferramentas
 │   │   ├── safeguards.py          # Segurança (Luz Verde)
 │   │   ├── memory.py              # Memória local
@@ -444,7 +487,7 @@ Nexus-Agent/
 │   │   ├── state.py               # Monitor de atividade
 │   │   └── logging_utils.py       # Logging
 │   ├── ui/
-│   │   ├── app.py                 # Interface Textual (v2.0)
+│   │   ├── app.py                 # Interface Textual (v2.1)
 │   │   ├── plain_cli.py           # CLI puro
 │   │   └── setup_cli.py           # Setup via terminal
 │   ├── pc_remote_agent/           # Automação de GUI
@@ -551,7 +594,7 @@ nexus uninstall
 
 - [x] v1.0 — UI Textual, ferramentas básicas, segurança
 - [x] v2.0 — Planner/Executor, Tool Registry, Modo Missão, Luz Verde real
-- [ ] v2.1 — Suporte a MCP (Model Context Protocol)
+- [x] v2.1 — Suporte a MCP (Model Context Protocol)
 - [ ] v2.2 — Notebook integration (Jupyter)
 - [ ] v3.0 — Agentes múltiplos em paralelo
 

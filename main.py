@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import json
 import shutil
 import os
 import platform
@@ -12,19 +13,25 @@ from pathlib import Path
 from core.actions import AcoesAgente
 from core.config import (
     NexusPaths,
+    NexusMcpServer,
     activate_account,
     activate_agent,
     add_account,
     add_agent,
+    add_mcp_server,
     config_exists,
     find_account,
     load_config,
     logout_account,
     normalize_ui_mode,
+    remove_mcp_server,
     save_config,
+    slugify_name,
+    unique_id,
     verify_password,
 )
 from core.llm import LiteLLMBridge
+from core.mcp import list_mcp_resources, list_mcp_servers, list_mcp_tools, read_mcp_resource
 from core.logging_utils import log_event
 from core.safeguards import blocked_examples, blocked_reasons
 from core.state import ActivityMonitor
@@ -50,7 +57,7 @@ def password_gate(prompt_label: str = "Nexus Password: ") -> str:
 
 
 def build_runtime(config, monitor) -> LiteLLMBridge:
-    return LiteLLMBridge(config, monitor, AcoesAgente())
+    return LiteLLMBridge(config, monitor, AcoesAgente(config))
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -74,6 +81,21 @@ def build_parser() -> argparse.ArgumentParser:
     add_agent_cmd.add_argument("--account", help="Conta dona do agente")
     use_agent = sub.add_parser("use-agent", help="Ativa um agente existente")
     use_agent.add_argument("agent", help="Nome ou ID do agente")
+    mcp = sub.add_parser("mcp", help="Gerencia servidores MCP configurados")
+    mcp_sub = mcp.add_subparsers(dest="mcp_command", required=True)
+    mcp_sub.add_parser("list", help="Lista servidores MCP")
+    mcp_add = mcp_sub.add_parser("add", help="Adiciona um servidor MCP via stdio")
+    mcp_add.add_argument("--name", required=True, help="Nome do servidor MCP")
+    mcp_add.add_argument("--command", required=True, help="Comando para iniciar o servidor MCP")
+    mcp_remove = mcp_sub.add_parser("remove", help="Remove um servidor MCP")
+    mcp_remove.add_argument("server", help="Nome ou ID do servidor")
+    mcp_resources = mcp_sub.add_parser("resources", help="Lista recursos de um servidor MCP")
+    mcp_resources.add_argument("server", help="Nome ou ID do servidor")
+    mcp_read = mcp_sub.add_parser("read", help="Lê um recurso MCP")
+    mcp_read.add_argument("server", help="Nome ou ID do servidor")
+    mcp_read.add_argument("uri", help="URI do recurso MCP")
+    mcp_tools = mcp_sub.add_parser("tools", help="Lista ferramentas de um servidor MCP")
+    mcp_tools.add_argument("server", help="Nome ou ID do servidor")
     sub.add_parser("uninstall", help="Remove a instalacao local do NEXUS AGENT")
     sub.add_parser("update", help="Atualiza o NEXUS AGENT via git pull")
     return parser
@@ -109,6 +131,7 @@ def handle_doctor() -> int:
         active_agent = config.active_agent.name if config.active_agent else "-"
         print(f"accounts={len(config.accounts)} active_account={active_account}")
         print(f"agents={len(config.agents)} active_agent={active_agent}")
+        print(f"mcp_servers={len(config.mcp_servers)}")
     return 0
 
 
@@ -249,6 +272,84 @@ def handle_use_agent(agent_query: str) -> int:
     return 0
 
 
+def handle_mcp(args) -> int:
+    if not config_exists():
+        print("Nenhuma configuracao encontrada. Rode nexus setup primeiro.")
+        return 1
+
+    config = load_config()
+    if args.mcp_command == "list":
+        servers = list_mcp_servers(config)
+        if not servers:
+            print("Nenhum servidor MCP configurado.")
+            return 0
+        print("Servidores MCP:\n")
+        for server in servers:
+            status = "on" if server.get("enabled", True) else "off"
+            print(f"- {server['name']} [{server['id']}] | {status} | {server['command']}")
+        return 0
+
+    if args.mcp_command == "add":
+        existing_ids = {server.id for server in config.mcp_servers}
+        server = NexusMcpServer(
+            id=unique_id(args.name, slugify_name(args.name, "mcp"), existing_ids),
+            name=args.name.strip(),
+            command=args.command.strip(),
+            enabled=True,
+        )
+        add_mcp_server(config, server)
+        save_config(config)
+        print(f"Servidor MCP adicionado: {server.name}")
+        return 0
+
+    if args.mcp_command == "remove":
+        try:
+            server = remove_mcp_server(config, args.server)
+        except ValueError as exc:
+            print(str(exc))
+            return 1
+        save_config(config)
+        print(f"Servidor MCP removido: {server.name}")
+        return 0
+
+    if args.mcp_command == "resources":
+        try:
+            resources = list_mcp_resources(config, args.server)
+        except Exception as exc:
+            print(f"Erro MCP: {exc}")
+            return 1
+        if not resources:
+            print("Nenhum recurso MCP encontrado.")
+            return 0
+        for item in resources:
+            print(f"- {item.get('name') or item.get('uri')} | {item.get('uri')}")
+        return 0
+
+    if args.mcp_command == "read":
+        try:
+            payload = read_mcp_resource(config, args.server, args.uri)
+        except Exception as exc:
+            print(f"Erro MCP: {exc}")
+            return 1
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+        return 0
+
+    if args.mcp_command == "tools":
+        try:
+            tools = list_mcp_tools(config, args.server)
+        except Exception as exc:
+            print(f"Erro MCP: {exc}")
+            return 1
+        if not tools:
+            print("Nenhuma ferramenta MCP encontrada.")
+            return 0
+        for item in tools:
+            print(f"- {item.get('name')} | {item.get('description', '')}")
+        return 0
+
+    return 0
+
+
 def ensure_config(force_setup: bool = False) -> None:
     if force_setup or not config_exists():
         _, SetupApp = import_ui_components(required=False)
@@ -375,6 +476,8 @@ def main(argv: list[str] | None = None) -> int:
         return handle_add_agent(args.account)
     if args.command == "use-agent":
         return handle_use_agent(args.agent)
+    if args.command == "mcp":
+        return handle_mcp(args)
     if args.command == "blocked":
         return handle_blocked()
     if args.command == "doctor":

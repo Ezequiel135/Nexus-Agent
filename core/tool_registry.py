@@ -50,16 +50,24 @@ class ToolRegistry:
     def tool_schemas(self) -> list[dict[str, Any]]:
         schemas: list[dict[str, Any]] = []
         for tool in self._tools.values():
+            if (
+                isinstance(tool.parameters, dict)
+                and tool.parameters.get("type") == "object"
+                and "properties" in tool.parameters
+            ):
+                parameters = tool.parameters
+            else:
+                parameters = {
+                    "type": "object",
+                    "properties": tool.parameters,
+                    "required": list(tool.parameters.keys()),
+                }
             schemas.append({
                 "type": "function",
                 "function": {
                     "name": tool.name,
                     "description": tool.description,
-                    "parameters": {
-                        "type": "object",
-                        "properties": tool.parameters,
-                        "required": list(tool.parameters.keys()),
-                    },
+                    "parameters": parameters,
                 },
             })
         return schemas

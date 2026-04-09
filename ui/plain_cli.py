@@ -55,7 +55,7 @@ class PlainNexusCLI:
         self.console.print(
             Panel.fit(
                 "[bold green]NEXUS AGENT[/bold green]\n"
-                "[yellow]Modo plain estilo Codex/Claude Code[/yellow]\n"
+                "[yellow]Modo plain estilo Codex/Claude Code | v2.1[/yellow]\n"
                 "[dim cyan]Criado por Ezequiel 135[/dim cyan]\n"
                 "[white]Shell + Files + Vision + Memory + Tool Use[/white]",
                 border_style="bright_cyan",
@@ -92,6 +92,7 @@ class PlainNexusCLI:
             table.add_row("/status", "Mostra status do agente")
             table.add_row("/accounts", "Lista contas configuradas")
             table.add_row("/agents", "Lista agentes configurados")
+            table.add_row("/mcp", "Lista servidores MCP configurados")
             table.add_row("/tools", "Mostra as ferramentas locais que a IA sabe usar")
             table.add_row("/memory", "Mostra a memoria local salva")
             table.add_row("/remember texto", "Salva uma memoria local manualmente")
@@ -108,7 +109,8 @@ class PlainNexusCLI:
                     f"estado={snap.state}\nmodelo={snap.current_model}\nlatencia={snap.api_latency_ms} ms\n"
                     f"autonomous={snap.autonomous_mode}\n"
                     f"conta={(self.bridge.config.active_account.name if self.bridge.config.active_account else '-')}\n"
-                    f"agente={(self.bridge.config.active_agent.name if self.bridge.config.active_agent else '-')}",
+                    f"agente={(self.bridge.config.active_agent.name if self.bridge.config.active_agent else '-')}\n"
+                    f"mcp={len(self.bridge.config.mcp_servers)}",
                     title="Status",
                     border_style="yellow",
                 )
@@ -144,6 +146,19 @@ class PlainNexusCLI:
                     agent.system_prompt or "-",
                 )
             self.console.print(table)
+            return False
+        if command == "/mcp":
+            table = Table(title="Servidores MCP")
+            table.add_column("Nome", style="white")
+            table.add_column("ID", style="cyan")
+            table.add_column("Status", style="green")
+            table.add_column("Comando", style="yellow")
+            for server in self.bridge.config.mcp_servers:
+                table.add_row(server.name, server.id, "on" if server.enabled else "off", server.command)
+            if not self.bridge.config.mcp_servers:
+                self.console.print("[yellow]Nenhum servidor MCP configurado.[/yellow]")
+            else:
+                self.console.print(table)
             return False
         if command in {"/init", "/onboarding"}:
             self.console.print(

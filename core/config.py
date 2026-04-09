@@ -64,6 +64,14 @@ class NexusAgentProfile:
 
 
 @dataclass(slots=True)
+class NexusMcpServer:
+    id: str
+    name: str
+    command: str
+    enabled: bool = True
+
+
+@dataclass(slots=True)
 class NexusConfig:
     password_hash: str
     password_salt: str
@@ -72,6 +80,7 @@ class NexusConfig:
     active_account_id: str = ""
     agents: list[NexusAgentProfile] = field(default_factory=list)
     active_agent_id: str = ""
+    mcp_servers: list[NexusMcpServer] = field(default_factory=list)
 
     @property
     def active_account(self) -> NexusAccount | None:
@@ -314,6 +323,14 @@ def find_agent(config: NexusConfig, query: str) -> NexusAgentProfile | None:
     return None
 
 
+def find_mcp_server(config: NexusConfig, query: str) -> NexusMcpServer | None:
+    needle = query.strip().lower()
+    for server in config.mcp_servers:
+        if server.id == query or server.name.lower() == needle:
+            return server
+    return None
+
+
 def add_account(config: NexusConfig, account: NexusAccount, activate: bool = True) -> None:
     config.accounts.append(account)
     if activate:
@@ -326,6 +343,18 @@ def add_agent(config: NexusConfig, agent: NexusAgentProfile, activate: bool = Tr
         config.active_agent_id = agent.id
         if agent.account_id:
             config.active_account_id = agent.account_id
+
+
+def add_mcp_server(config: NexusConfig, server: NexusMcpServer) -> None:
+    config.mcp_servers.append(server)
+
+
+def remove_mcp_server(config: NexusConfig, server_query: str) -> NexusMcpServer:
+    server = find_mcp_server(config, server_query)
+    if server is None:
+        raise ValueError(f"Servidor MCP nao encontrado: {server_query}")
+    config.mcp_servers = [item for item in config.mcp_servers if item.id != server.id]
+    return server
 
 
 def ensure_agent_for_account(config: NexusConfig, account_id: str) -> NexusAgentProfile:
@@ -381,6 +410,9 @@ def normalize_config(config: NexusConfig) -> NexusConfig:
     for agent in config.agents:
         agent.name = agent.name.strip() or "Agente"
         agent.system_prompt = agent.system_prompt.strip()
+    for server in config.mcp_servers:
+        server.name = server.name.strip() or "MCP"
+        server.command = server.command.strip()
 
     known_account_ids = {account.id for account in config.accounts}
     config.agents = [
@@ -438,6 +470,7 @@ def load_config() -> NexusConfig:
         active_account_id=payload.get("active_account_id", ""),
         agents=[NexusAgentProfile(**item) for item in payload.get("agents", [])],
         active_agent_id=payload.get("active_agent_id", ""),
+        mcp_servers=[NexusMcpServer(**item) for item in payload.get("mcp_servers", [])],
     )
     return normalize_config(config)
 

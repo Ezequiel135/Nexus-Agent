@@ -6,17 +6,19 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from .config import NexusPaths
+from .config import NexusConfig, NexusPaths
 from .logging_utils import log_event
+from .mcp import call_mcp_tool, list_mcp_resources, list_mcp_servers, list_mcp_tools, read_mcp_resource
 from .memory import remember, search_memory
 from .safeguards import command_is_safe
 from .tool_registry import ToolRegistry
 
 
 class AcoesAgente(ToolRegistry):
-    def __init__(self) -> None:
+    def __init__(self, config: NexusConfig | None = None) -> None:
         super().__init__()
         NexusPaths.ensure()
+        self.config = config
         self._event_callback = None
         self._register_tools()
 
@@ -96,6 +98,34 @@ class AcoesAgente(ToolRegistry):
                 "required": ["x", "y"],
             },
             func=self.verificar_pixel,
+        )
+        self.register(
+            name="consultar_mcp",
+            description=(
+                "Consulta servidores MCP configurados no host. "
+                "Acoes: listar_servidores, listar_recursos, ler_recurso, listar_ferramentas, chamar_ferramenta."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "acao": {
+                        "type": "string",
+                        "enum": [
+                            "listar_servidores",
+                            "listar_recursos",
+                            "ler_recurso",
+                            "listar_ferramentas",
+                            "chamar_ferramenta",
+                        ],
+                    },
+                    "servidor": {"type": "string"},
+                    "uri": {"type": "string"},
+                    "ferramenta": {"type": "string"},
+                    "argumentos": {"type": "object"},
+                },
+                "required": ["acao"],
+            },
+            func=self.consultar_mcp,
         )
 
     def dispatch_tool(self, name: str, arguments: dict[str, Any]) -> str:
@@ -213,3 +243,42 @@ class AcoesAgente(ToolRegistry):
             clear_memory()
             return json.dumps({"ok": True, "cleared": True}, ensure_ascii=False)
         raise ValueError(f"Acao de memoria desconhecida: {acao}")
+
+    def consultar_mcp(
+        self,
+        acao: str,
+        servidor: str | None = None,
+        uri: str | None = None,
+        ferramenta: str | None = None,
+        argumentos: dict[str, Any] | None = None,
+    ) -> str:
+        if self.config is None:
+            return json.dumps({"ok": False, "erro": "Configuracao MCP indisponivel no runtime."}, ensure_ascii=False)
+
+        line = log_event("MCP", f"{acao} servidor={servidor or '-'}")
+        self._emit(line)
+
+        if acao == "listar_servidores":
+            servers = list_mcp_servers(self.config)
+            return json.dumps({"ok": True, "servers": servers}, ensure_ascii=False)
+        if acao == "listar_recursos":
+            if not servidor:
+                return json.dumps({"ok": False, "erro": "servidor e obrigatorio"}, ensure_ascii=False)
+            resources = list_mcp_resources(self.config, servidor)
+            return json.dumps({"ok": True, "resources": resources}, ensure_ascii=False)
+        if acao == "ler_recurso":
+            if not servidor or not uri:
+                return json.dumps({"ok": False, "erro": "servidor e uri sao obrigatorios"}, ensure_ascii=False)
+            payload = read_mcp_resource(self.config, servidor, uri)
+            return json.dumps({"ok": True, **payload}, ensure_ascii=False)
+        if acao == "listar_ferramentas":
+            if not servidor:
+                return json.dumps({"ok": False, "erro": "servidor e obrigatorio"}, ensure_ascii=False)
+            tools = list_mcp_tools(self.config, servidor)
+            return json.dumps({"ok": True, "tools": tools}, ensure_ascii=False)
+        if acao == "chamar_ferramenta":
+            if not servidor or not ferramenta:
+                return json.dumps({"ok": False, "erro": "servidor e ferramenta sao obrigatorios"}, ensure_ascii=False)
+            payload = call_mcp_tool(self.config, servidor, ferramenta, argumentos or {})
+            return json.dumps({"ok": True, **payload}, ensure_ascii=False)
+        raise ValueError(f"Acao MCP desconhecida: {acao}")
