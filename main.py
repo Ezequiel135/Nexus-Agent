@@ -39,6 +39,8 @@ from core.notebooks import append_cell, create_notebook, execute_notebook, list_
 from core.logging_utils import log_event
 from core.safeguards import blocked_examples, blocked_reasons
 from core.state import ActivityMonitor
+from core.parallel import ParallelAgentRunner
+from core.version import APP_VERSION
 
 DEFAULT_WHATSAPP_GRAPH_VERSION = "v23.0"
 
@@ -68,6 +70,7 @@ def build_runtime(config, monitor) -> LiteLLMBridge:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="nexus", description="NEXUS AGENT local autonomy protocol")
+    parser.add_argument("--version", action="version", version=f"%(prog)s {APP_VERSION}")
     sub = parser.add_subparsers(dest="command", required=True)
 
     start = sub.add_parser("start", help="Inicia o NEXUS AGENT")
@@ -87,6 +90,15 @@ def build_parser() -> argparse.ArgumentParser:
     add_agent_cmd.add_argument("--account", help="Conta dona do agente")
     use_agent = sub.add_parser("use-agent", help="Ativa um agente existente")
     use_agent.add_argument("agent", help="Nome ou ID do agente")
+    parallel = sub.add_parser("parallel", help="Executa varios agentes em paralelo")
+    parallel_sub = parallel.add_subparsers(dest="parallel_command", required=True)
+    parallel_sub.add_parser("list", help="Lista agentes disponiveis para execucao paralela")
+    parallel_run = parallel_sub.add_parser("run", help="Roda uma tarefa em varios agentes ao mesmo tempo")
+    parallel_run.add_argument("--task", required=True, help="Objetivo a enviar para os agentes")
+    parallel_run.add_argument("--agent", action="append", dest="agents", help="Nome ou ID de um agente. Repita para varios.")
+    parallel_run.add_argument("--mode", choices=["chat", "plan"], default="plan", help="plan gera apenas planos; chat usa o runtime completo")
+    parallel_run.add_argument("--max-rounds", type=int, default=6, help="Maximo de rodadas de tool-calls por agente no modo chat")
+    parallel_run.add_argument("--json", action="store_true", help="Imprime o resultado em JSON")
     mcp = sub.add_parser("mcp", help="Gerencia servidores MCP configurados")
     mcp_sub = mcp.add_subparsers(dest="mcp_command", required=True)
     mcp_sub.add_parser("list", help="Lista servidores MCP")
@@ -165,6 +177,7 @@ def handle_blocked() -> int:
 def handle_doctor() -> int:
     config = load_config() if config_exists() else None
     print("NEXUS AGENT doctor\n")
+    print(f"version={APP_VERSION}")
     print(f"platform={platform.system()} {platform.release()}")
     print(f"python={sys.version.split()[0]}")
     print(f"stdin_tty={sys.stdin.isatty()}")
@@ -321,6 +334,66 @@ def handle_use_agent(agent_query: str) -> int:
         return 1
     save_config(config)
     print(f"Agente ativo alterado para: {agent.name}")
+    return 0
+
+
+def handle_parallel(args) -> int:
+    if not config_exists():
+        print("Nenhuma configuracao encontrada. Rode nexus setup.")
+        return 1
+
+    config = load_config()
+    runner = ParallelAgentRunner(config)
+
+    if args.parallel_command == "list":
+        if not config.agents:
+            print("Nenhum agente configurado.")
+            return 1
+        print("Agentes disponiveis para execucao paralela:\n")
+        for agent in config.agents:
+            account = find_account(config, agent.account_id)
+            account_name = account.name if account is not None else "-"
+            marker = "*" if config.active_agent_id == agent.id else " "
+            extra = f" | prompt={agent.system_prompt}" if agent.system_prompt else ""
+            print(f"{marker} {agent.name} [{agent.id}] | conta={account_name}{extra}")
+        return 0
+
+    try:
+        payload = runner.run(
+            args.task,
+            agent_queries=args.agents,
+            mode=args.mode,
+            max_rounds=args.max_rounds,
+        )
+    except ValueError as exc:
+        print(str(exc))
+        return 1
+
+    if args.json:
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+        return 0
+
+    print(
+        f"Execucao paralela: {payload['agent_count']} agente(s) | "
+        f"modo={payload['mode']} | versao={APP_VERSION}"
+    )
+    print(f"Tarefa: {payload['task']}\n")
+    for item in payload["results"]:
+        status = "OK" if item["ok"] else "ERROR"
+        print(
+            f"[{status}] {item['agent_name']} | conta={item['account_name']} | "
+            f"{item['elapsed_ms']} ms"
+        )
+        if item.get("tool_logs"):
+            print(f"tools={', '.join(item['tool_logs'][:4])}")
+        if item["ok"]:
+            if item.get("mode") == "plan":
+                print(f"plan_steps={item.get('plan_steps', 0)}")
+            print(item["output"] or "(sem resposta)")
+        else:
+            print(item.get("error", "Falha sem detalhe"))
+        print("")
+    print(payload["summary"])
     return 0
 
 
@@ -618,7 +691,7 @@ def handle_start(task: str | None, plain: bool = False) -> int:
 def handle_onboarding(plain: bool = False) -> int:
     welcome_task = (
         "Entre em modo onboarding. Apresente o NEXUS AGENT, explique comandos principais, "
-        "como salvar memoria local, como atualizar, como ver comandos bloqueados e como operar no modo terminal."
+        "como salvar memoria local, como usar agentes em paralelo, como ver comandos bloqueados e como operar no modo terminal."
     )
     return handle_start(welcome_task, plain=plain)
 
@@ -673,6 +746,8 @@ def main(argv: list[str] | None = None) -> int:
         return handle_add_agent(args.account)
     if args.command == "use-agent":
         return handle_use_agent(args.agent)
+    if args.command == "parallel":
+        return handle_parallel(args)
     if args.command == "mcp":
         return handle_mcp(args)
     if args.command == "notebook":

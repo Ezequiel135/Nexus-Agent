@@ -13,6 +13,7 @@ from core.memory import clear_memory, memory_summary, remember
 from core.notebooks import list_notebooks
 from core.safeguards import blocked_examples, blocked_reasons
 from core.state import ActivityMonitor
+from core.version import APP_VERSION
 
 
 class PlainNexusCLI:
@@ -56,9 +57,9 @@ class PlainNexusCLI:
         self.console.print(
             Panel.fit(
                 "[bold green]NEXUS AGENT[/bold green]\n"
-                "[yellow]Modo plain estilo Codex/Claude Code | v2.2[/yellow]\n"
+                f"[yellow]Modo plain estilo Codex/Claude Code | {APP_VERSION}[/yellow]\n"
                 "[dim cyan]Criado por Ezequiel 135[/dim cyan]\n"
-                "[white]Shell + Files + Vision + Memory + MCP + Notebooks + Remote Bots[/white]",
+                "[white]Shell + Files + Vision + Memory + MCP + Notebooks + Remote Bots + Parallel Agents[/white]",
                 border_style="bright_cyan",
             )
         )
@@ -96,6 +97,7 @@ class PlainNexusCLI:
             table.add_row("/mcp", "Lista servidores MCP configurados")
             table.add_row("/notebooks", "Lista notebooks Jupyter")
             table.add_row("/remote", "Lista integracoes remotas")
+            table.add_row("nexus parallel run ...", "Executa varios agentes em paralelo via CLI")
             table.add_row("/tools", "Mostra as ferramentas locais que a IA sabe usar")
             table.add_row("/memory", "Mostra a memoria local salva")
             table.add_row("/remember texto", "Salva uma memoria local manualmente")
@@ -206,7 +208,7 @@ class PlainNexusCLI:
                     "3. Use /tools para ver capacidades.\n"
                     "4. Use /memory para ver memoria local.\n"
                     "5. Use /blocked para ver o que nunca sera executado.\n"
-                    "6. Use nexus update para atualizar via GitHub.\n"
+                    "6. Use nexus parallel run para coordenar varios agentes.\n"
                     "7. Use nexus uninstall para remover a instalacao local.",
                     title="Onboarding",
                     border_style="bright_cyan",

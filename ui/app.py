@@ -27,6 +27,7 @@ from core.llm import LiteLLMBridge
 from core.logging_utils import log_event
 from core.state import ActivityMonitor, LIGHT_COLORS, LIGHT_SYMBOLS
 from core.safeguards import assess_command_light
+from core.version import APP_VERSION
 
 
 def _cpu_and_ram() -> str:
@@ -69,7 +70,7 @@ class NexusHeader(Static):
             "| . ` |  __|  /  \\  | | \\___ \\ \n"
             "| |\\  | |____/ /\\ \\_| |_ ____) |\n"
             "|_| \\_|______/_/  \\_\\_____|____/[/bold cyan]\n"
-            f"[bold green]NEXUS AGENT v2.2 — STATUS: [OPERACIONAL][/bold green]   [{color}]{dot}[/{color}]\n"
+            f"[bold green]NEXUS AGENT {APP_VERSION} — STATUS: [OPERACIONAL][/bold green]   [{color}]{dot}[/{color}]\n"
             "[dim cyan]Criado por Ezequiel 135[/dim cyan]"
         )
 
@@ -188,10 +189,16 @@ class SetupApp(App[SetupPayload | None]):
 
     def on_mount(self) -> None:
         self._toggle_custom_provider_fields()
+        self.call_after_refresh(self._focus_setup_input)
 
     def on_select_changed(self, event: Select.Changed) -> None:
         if event.select.id == "provider":
             self._toggle_custom_provider_fields()
+            next_field = "#custom_provider" if normalize_provider(str(event.value or "OpenAI")) == "Custom" else "#api_key"
+            self.call_after_refresh(lambda: self.query_one(next_field, Input).focus())
+
+    def _focus_setup_input(self) -> None:
+        self.query_one("#account_name", Input).focus()
 
     def _toggle_custom_provider_fields(self) -> None:
         provider = str(self.query_one("#provider", Select).value or "OpenAI")
@@ -199,6 +206,7 @@ class SetupApp(App[SetupPayload | None]):
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         if event.input.id != "password":
+            self._focus_next_setup_input(event.input.id)
             return
         ui_mode = self.query_one("#ui_mode", Select).value or "visual"
         account_name = self.query_one("#account_name", Input).value.strip() or "Conta principal"
@@ -210,14 +218,25 @@ class SetupApp(App[SetupPayload | None]):
         agent_name = self.query_one("#agent_name", Input).value.strip() or "Agente principal"
         agent_prompt = self.query_one("#agent_prompt", Input).value.strip()
         password = self.query_one("#password", Input).value.strip()
-        if not api_key or not model_name or not password:
-            self.notify("Preencha conta, provider, API key, model, agente e senha.")
+        if not api_key:
+            self.notify("Preencha a API Key da conta.")
+            self.query_one("#api_key", Input).focus()
+            return
+        if not model_name:
+            self.notify("Preencha o Model Name.")
+            self.query_one("#model_name", Input).focus()
+            return
+        if not password:
+            self.notify("Preencha a senha do Nexus.")
+            self.query_one("#password", Input).focus()
             return
         if normalize_provider(str(provider)) == "Custom" and not custom_provider:
             self.notify("Provider custom exige Nome/ID do provider.")
+            self.query_one("#custom_provider", Input).focus()
             return
         if normalize_provider(str(provider)) == "Custom" and not base_url:
             self.notify("Provider custom exige Base URL / Endpoint.")
+            self.query_one("#base_url", Input).focus()
             return
         password_hash, salt = create_password_hash(password)
         account = make_account(
@@ -235,6 +254,22 @@ class SetupApp(App[SetupPayload | None]):
         )
         save_config(build_initial_config(password_hash, salt, str(ui_mode), account, agent))
         self.exit(SetupPayload(str(ui_mode), account_name, str(provider), model_name, agent_name, password))
+
+    def _focus_next_setup_input(self, input_id: str) -> None:
+        provider = str(self.query_one("#provider", Select).value or "OpenAI")
+        custom_mode = normalize_provider(provider) == "Custom"
+        next_map = {
+            "account_name": "custom_provider" if custom_mode else "api_key",
+            "custom_provider": "base_url",
+            "base_url": "api_key",
+            "api_key": "model_name",
+            "model_name": "agent_name",
+            "agent_name": "agent_prompt",
+            "agent_prompt": "password",
+        }
+        next_id = next_map.get(input_id)
+        if next_id:
+            self.query_one(f"#{next_id}", Input).focus()
 
 
 class MissionPanel(Static):
@@ -293,7 +328,7 @@ class NexusApp(App[None]):
                 yield Input(placeholder="Digite um objetivo ou comando para o Nexus...", id="prompt")
             with Vertical(id="log-panel"):
                 yield Static("Action & Log Panel", classes="panel-title")
-                yield Static("Comandos uteis: onboarding | blocked | update | accounts | agents | mcp | notebook | remote", classes="hint-box")
+                yield Static("Comandos uteis: onboarding | blocked | accounts | agents | parallel | mcp | notebook | remote", classes="hint-box")
                 yield RichLog(id="action-log", markup=True, wrap=True)
         yield StatusBar(self.monitor, self.bridge.config)
         yield Footer()
@@ -302,7 +337,7 @@ class NexusApp(App[None]):
         self.bridge.actions.set_event_callback(lambda text: self.call_from_thread(self._write_log, text))
         self.conversation = self._load_history()
         ok, message = self.bridge.handshake()
-        self._write_chat("[bold green]NEXUS AGENT v2.2 ONLINE[/bold green]" if ok else f"[bold red]{message}[/bold red]")
+        self._write_chat(f"[bold green]NEXUS AGENT {APP_VERSION} ONLINE[/bold green]" if ok else f"[bold red]{message}[/bold red]")
         self._write_chat(
             "Use esta interface como um agente autonomo. "
             "Descreva um objetivo (ex: 'organiza minha pasta Downloads') e o NEXUS PLANEJA + EXECUTA."
@@ -318,10 +353,14 @@ class NexusApp(App[None]):
             state = "ARMADO" if self.bridge.config.remote_armed else "DESARMADO"
             self._write_log(f"Remote bots: {len(self.bridge.config.remote_integrations)} integracao(oes) | {state}")
         self._write_log(f"Notebook root: {NexusPaths.notebooks_dir}")
-        self._write_log("Modo Missao: decomposicao automatica de tarefas. Marca d'agua: Ezequiel 135")
+        self._write_log("Modo Missao: decomposicao automatica de tarefas. Execucao paralela disponivel via CLI.")
+        self.call_after_refresh(self._focus_prompt)
         if self.initial_task:
             self.query_one("#prompt", Input).value = self.initial_task
             self._submit_prompt(self.initial_task)
+
+    def _focus_prompt(self) -> None:
+        self.query_one("#prompt", Input).focus()
 
     def _write_chat(self, text: str) -> None:
         self.query_one("#chat-log", RichLog).write(Markdown(text))
@@ -345,6 +384,7 @@ class NexusApp(App[None]):
         event.input.value = ""
         if prompt:
             self._submit_prompt(prompt)
+        self._focus_prompt()
 
     def _submit_prompt(self, prompt: str) -> None:
         self._write_chat(f"**Você:** {prompt}")
@@ -373,6 +413,8 @@ class NexusApp(App[None]):
             self.monitor.set_state("error", str(exc))
             self.call_from_thread(self._write_chat, f"**ERRO:** {exc}")
             self.call_from_thread(self._write_log, f"[ERROR] {exc}")
+        finally:
+            self.call_from_thread(self._focus_prompt)
 
     def _process_plan(self, prompt: str) -> None:
         try:
@@ -442,6 +484,8 @@ class NexusApp(App[None]):
             self.call_from_thread(self._set_light, f"🔴 ERRO: {exc}", "🔴")
             self.call_from_thread(self._write_chat, f"**ERRO:** {exc}")
             self.call_from_thread(self._write_log, f"[ERROR] {exc}")
+        finally:
+            self.call_from_thread(self._focus_prompt)
 
     def _load_history(self) -> list[dict[str, str]]:
         NexusPaths.ensure()

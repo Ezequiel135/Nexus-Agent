@@ -55,11 +55,19 @@ def planner_prompt(config: NexusConfig) -> str:
 
 
 class PlannerExecutor:
-    def __init__(self, config: NexusConfig, monitor: ActivityMonitor, actions: AcoesAgente) -> None:
+    def __init__(
+        self,
+        config: NexusConfig,
+        monitor: ActivityMonitor,
+        actions: AcoesAgente,
+        *,
+        export_env: bool = True,
+    ) -> None:
         self.config = config
         self.monitor = monitor
         self.actions = actions
-        self.config.export_runtime_env()
+        if export_env:
+            self.config.export_runtime_env()
         self.monitor.set_model(config.model_name)
 
     def _completion(self, messages: list[dict[str, Any]]) -> Any:
@@ -155,12 +163,19 @@ class PlannerExecutor:
 
 
 class LiteLLMBridge:
-    def __init__(self, config: NexusConfig, monitor: ActivityMonitor, actions: AcoesAgente) -> None:
+    def __init__(
+        self,
+        config: NexusConfig,
+        monitor: ActivityMonitor,
+        actions: AcoesAgente,
+        export_env: bool = True,
+    ) -> None:
         self.config = config
         self.monitor = monitor
         self.actions = actions
-        self.planner = PlannerExecutor(config, monitor, actions)
-        self.config.export_runtime_env()
+        self.planner = PlannerExecutor(config, monitor, actions, export_env=False)
+        if export_env:
+            self.config.export_runtime_env()
         self.monitor.set_model(config.model_name)
 
     def _completion(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None) -> Any:

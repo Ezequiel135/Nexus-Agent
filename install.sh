@@ -18,7 +18,7 @@ YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-echo -e "${CYAN}╔═══ NEXUS AGENT INSTALLER v2.2 ═══╗${NC}"
+echo -e "${CYAN}╔══ NEXUS AGENT INSTALLER 26.1.0 ══╗${NC}"
 echo -e "${CYAN}║  Criado por Ezequiel 135          ║${NC}"
 echo -e "${CYAN}╚═══════════════════════════════════╝${NC}"
 echo ""
@@ -167,7 +167,7 @@ echo -e "[6/6] Criando wrapper local..."
 # Wrapper em ~/.local/bin (garante prioridade sobre /usr/local/bin)
 cat > "${WRAPPER_PATH}" <<'EOF'
 #!/usr/bin/env bash
-# NEXUS AGENT WRAPPER v2.2
+# NEXUS AGENT WRAPPER 26.1.0
 export NEXUS_HOME="${HOME}/.nexus"
 exec "${NEXUS_HOME}/env/bin/python" "${NEXUS_HOME}/src/main.py" "$@"
 EOF
@@ -178,7 +178,7 @@ if [ "${NEXUS_INSTALL_GLOBAL:-0}" = "1" ]; then
     echo "  Criando wrapper global em ${GLOBAL_WRAPPER_PATH}..."
     sudo tee "${GLOBAL_WRAPPER_PATH}" > /dev/null <<'EOF'
 #!/usr/bin/env bash
-# NEXUS AGENT WRAPPER v2.2 — global
+# NEXUS AGENT WRAPPER 26.1.0 — global
 export NEXUS_HOME="${HOME}/.nexus"
 exec "${NEXUS_HOME}/env/bin/python" "${NEXUS_HOME}/src/main.py" "$@"
 EOF
@@ -203,7 +203,7 @@ fi
 
 echo ""
 echo -e "${GREEN}╔═══ INSTALACAO CONCLUIDA ═══╗${NC}"
-echo -e "${GREEN}║  NEXUS AGENT v2.2          ║${NC}"
+echo -e "${GREEN}║  NEXUS AGENT 26.1.0        ║${NC}"
 echo -e "${GREEN}╚════════════════════════════╝${NC}"
 echo ""
 echo -e "${CYAN}Como usar:${NC}"

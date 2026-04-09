@@ -1,4 +1,4 @@
-# NEXUS AGENT v2.2
+# NEXUS AGENT 26.1.0
 
 <div align="center">
 
@@ -95,6 +95,12 @@ Se quiser forçar um navegador específico, defina `NEXUS_BROWSER=chrome`, `chro
 - O setup aceita `Outro / Custom` para providers com `Nome/ID do provider`, `Base URL / Endpoint` e `API Key` em campos separados
 - O setup agora mostra um aviso acima de cada caixa dizendo exatamente onde colocar `Nome do provider`, `Base URL` e `API Key`
 
+### ⚡ Agentes Múltiplos em Paralelo
+- O comando `nexus parallel run` executa a mesma tarefa em vários agentes ao mesmo tempo
+- Dá para escolher `--mode chat` para resposta completa ou `--mode plan` para gerar planos paralelos
+- Cada agente roda com a conta e instrução próprias, facilitando comparação entre perfis
+- O prompt principal da UI agora abre com foco no campo de escrita, sem travar a digitação
+
 ### 📓 Notebooks Jupyter
 - Criação e leitura de notebooks `.ipynb` direto pelo CLI
 - Adição de células de código ou markdown
@@ -103,9 +109,9 @@ Se quiser forçar um navegador específico, defina `NEXUS_BROWSER=chrome`, `chro
 
 ## MCP
 
-Desde o `v2.1`, o NEXUS AGENT suporta **MCP (Model Context Protocol)** via `stdio`.
+Na linha `26.1.0`, o NEXUS AGENT suporta **MCP (Model Context Protocol)** via `stdio`.
 
-### O que entrou no v2.1
+### MCP na versão 26.1.0
 
 - Cadastro de servidores MCP no `config.json`
 - Comandos CLI para adicionar, listar, ler recursos e remover servidores MCP
@@ -135,9 +141,9 @@ nexus mcp remove filesystem
 
 ## Notebook + Bots Remotos
 
-O `v2.2` adiciona **Notebook integration (Jupyter)** e uma camada de **automação remota por bots**, pensada para usar o Nexus pelo celular com Telegram ou WhatsApp.
+A versão `26.1.0` consolida **Notebook integration (Jupyter)**, **automação remota por bots** e **agentes múltiplos em paralelo**.
 
-### O que entra no v2.2
+### O que entra na 26.1.0
 
 - Comandos CLI para criar, listar, ler, editar e executar notebooks `.ipynb`
 - Diretório padrão `~/.nexus/notebooks` para armazenar notebooks do agente
@@ -146,6 +152,7 @@ O `v2.2` adiciona **Notebook integration (Jupyter)** e uma camada de **automaç�
 - Integração remota com **WhatsApp Cloud API** via webhook
 - Modo remoto com trava global `arm/disarm`
 - Allowlist de remetentes autorizados e prefixo obrigatório por integração
+- Execução paralela de vários agentes via `nexus parallel run`
 
 ### Comandos de Notebook
 
@@ -186,7 +193,7 @@ nexus remote disarm
 ## Arquitetura
 
 ```
-NEXUS AGENT v2.2
+NEXUS AGENT 26.1.0
 ├── core/
 │   ├── llm.py           # LiteLLMBridge + PlannerExecutor
 │   ├── actions.py       # AcoesAgente (ToolRegistry)
@@ -501,6 +508,11 @@ nexus add-agent                # Cria um novo agente
 nexus add-agent --account "Conta"  # Cria agente preso a uma conta especifica
 nexus use-agent "Agente"       # Ativa um agente existente
 
+# Agentes em paralelo
+nexus parallel list
+nexus parallel run --task "Comparar estrategia de deploy" --agent "Agente principal" --agent "Revisor" --mode plan
+nexus parallel run --task "Responder ao cliente com resumo tecnico" --mode chat
+
 # MCP
 nexus mcp list                 # Lista servidores MCP
 nexus mcp add --name srv --command "comando"
@@ -537,7 +549,6 @@ nexus start --plain            # Inicia modo terminal puro
 nexus start --task "objetivo"  # Executa tarefa inicial
 
 # Manutenção
-nexus update                   # Atualiza via git pull
 nexus uninstall                # Remove instalação local
 ```
 
@@ -554,7 +565,7 @@ O Nexus armazena tudo em `~/.nexus/`:
 | `memory.json` | Memória local persistente (até 200 itens) |
 | `activity.json` | Estado atual do agente |
 | `nexus.log` | Logs detalhados de ações |
-| `repo.txt` | URL do repositório (usado no `update`) |
+| `repo.txt` | URL do repositório usada na instalação |
 | `notebooks/` | Notebooks `.ipynb` criados pelo Nexus |
 
 ---
@@ -578,7 +589,7 @@ Nexus-Agent/
 │   │   ├── state.py               # Monitor de atividade
 │   │   └── logging_utils.py       # Logging
 │   ├── ui/
-│   │   ├── app.py                 # Interface Textual (v2.2)
+│   │   ├── app.py                 # Interface Textual (26.1.0)
 │   │   ├── plain_cli.py           # CLI puro
 │   │   └── setup_cli.py           # Setup via terminal
 │   ├── pc_remote_agent/           # Automação de GUI
@@ -662,16 +673,6 @@ nexus doctor
 nexus start --plain
 ```
 
-### 5. Como atualizar?
-
-```bash
-nexus update
-# ou manual:
-git -C ~/.nexus/src pull origin main
-source ~/.nexus/env/bin/activate
-pip install -r ~/.nexus/src/requirements.txt
-```
-
 ### 6. Como desinstalar?
 
 ```bash
@@ -687,7 +688,23 @@ nexus uninstall
 - [x] v2.0 — Planner/Executor, Tool Registry, Modo Missão, Luz Verde real
 - [x] v2.1 — Suporte a MCP (Model Context Protocol)
 - [x] v2.2 — Notebook integration (Jupyter) + bots remotos (Telegram/WhatsApp)
-- [ ] v3.0 — Agentes múltiplos em paralelo
+- [x] v3.0 — Agentes múltiplos em paralelo
+
+---
+
+## Sistema de Versionamento (CalVer)
+
+Este projeto utiliza um sistema de versão baseado no calendário e progresso de desenvolvimento:
+**Formato: `ANO . ATUALIZAÇÃO . BUGFIX`**
+
+- **ANO:** Os dois últimos dígitos do ano atual (Ex: `26` para 2026).
+- **ATUALIZAÇÃO:** Incrementado a cada nova funcionalidade ou melhoria implementada.
+- **BUGFIX:** Incrementado quando o código recebe apenas correções de erros.
+
+**Exemplos:**
+- `26.1.0`: Primeira versão funcional de 2026.
+- `26.1.1`: Correção de um erro na versão anterior.
+- `27.1.0`: Primeira versão lançada em 2027.
 
 ---
 

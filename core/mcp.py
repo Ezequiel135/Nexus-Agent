@@ -10,9 +10,10 @@ from typing import Any
 
 from .config import NexusConfig, NexusMcpServer, find_mcp_server
 from .logging_utils import log_event
+from .version import APP_VERSION
 
 MCP_PROTOCOL_VERSION = "2025-06-18"
-MCP_CLIENT_VERSION = "2.2.0"
+MCP_CLIENT_VERSION = APP_VERSION
 
 
 class McpError(RuntimeError):
