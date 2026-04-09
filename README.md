@@ -77,9 +77,14 @@ Para tarefas com +4 palavras ou palavras-chave ("organizar", "criar", "instalar"
 Instalador multiplataforma que funciona de primeira:
 - Detecção automática de OS (Linux/macOS)
 - Fallback Python: `python3` → `python` → `python3.10-12`
+- Primeira abertura já entra em setup e deixa escolher entre UI Visual ou Terminal Plain
 - Cores no terminal, barra de progresso
 - PATH auto-configurado em `~/.bashrc` e `~/.zshrc`
 - Suporte a instalação global (`NEXUS_INSTALL_GLOBAL=1`)
+
+### 🌐 Browser Explícito
+As ações de navegador não usam mais o navegador padrão nem Brave. O agente abre URLs apenas em browsers suportados detectados explicitamente: `Chrome`, `Chromium`, `Firefox` ou `Edge`.
+Se quiser forçar um navegador específico, defina `NEXUS_BROWSER=chrome`, `chromium`, `firefox` ou `edge`.
 
 ---
 
@@ -141,14 +146,14 @@ chmod +x install.sh nexus
 ./install.sh
 
 # Abra um NOVO terminal e rode:
-nexus start
+nexus
 ```
 
 **One-liner via curl:**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Ezequiel135/Nexus-Agent/main/install.sh | bash
-nexus start
+nexus
 ```
 
 ### Opção 2: Instalação Manual
@@ -195,17 +200,21 @@ nexus start --plain
 
 Na primeira execução, o Nexus entra em **modo setup** e pede:
 
-1. **Provider** — OpenAI, Anthropic, Google, Ollama, Groq
-2. **API Key** — sua chave do provedor
-3. **Model Name** — ex: `gpt-4o-mini`, `claude-3-5-sonnet`, `llama3`
-4. **Senha Mestra** — protege o modo autônomo
+1. **Tipo de UI** — `Visual` ou `Terminal puro`
+2. **Provider** — OpenAI, Anthropic, Google, Ollama, Groq
+3. **API Key** — sua chave do provedor
+4. **Model Name** — ex: `gpt-4o-mini`, `claude-3-5-sonnet`, `llama3`
+5. **Senha Mestra** — protege o modo autônomo
 
 A configuração é salva em `~/.nexus/config.json`.
 
 ### Iniciar
 
 ```bash
-# Modo UI completo (recomendado)
+# Início padrão (abre visual ou plain conforme sua preferência salva)
+nexus
+
+# Modo UI completo (se a UI visual estiver disponível)
 nexus start
 
 # Modo terminal puro (estilo Codex/Claude Code)

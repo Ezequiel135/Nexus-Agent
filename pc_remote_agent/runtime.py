@@ -1,9 +1,9 @@
 import os
 import platform
 import random
+import shutil
 import subprocess
 import time
-import webbrowser
 from pathlib import Path
 
 import mss
@@ -21,6 +21,58 @@ HUMAN_MOVE_VAR = 0.18
 HUMAN_CLICK_PAUSE = (0.03, 0.09)
 HUMAN_TYPE_BASE = (0.018, 0.055)
 HUMAN_ACTION_DELAY = (0.35, 0.95)
+BROWSER_ALIASES = {
+    "chrome": "chrome",
+    "google chrome": "chrome",
+    "google-chrome": "chrome",
+    "google-chrome-stable": "chrome",
+    "chromium": "chromium",
+    "chromium-browser": "chromium",
+    "firefox": "firefox",
+    "mozilla firefox": "firefox",
+    "edge": "edge",
+    "microsoft edge": "edge",
+    "microsoft-edge": "edge",
+    "microsoft-edge-stable": "edge",
+}
+BROWSER_WINDOW_TITLES = {
+    "chrome": ("google chrome", "chrome"),
+    "chromium": ("chromium",),
+    "firefox": ("firefox",),
+    "edge": ("microsoft edge", "edge"),
+}
+BROWSER_COMMANDS = {
+    "linux": {
+        "chrome": [["google-chrome-stable"], ["google-chrome"], ["chrome"]],
+        "chromium": [["chromium-browser"], ["chromium"]],
+        "firefox": [["firefox"]],
+        "edge": [["microsoft-edge"], ["microsoft-edge-stable"]],
+    },
+    "windows": {
+        "chrome": [
+            ["chrome"],
+            [r"C:\Program Files\Google\Chrome\Application\chrome.exe"],
+            [r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"],
+        ],
+        "firefox": [
+            ["firefox"],
+            [r"C:\Program Files\Mozilla Firefox\firefox.exe"],
+            [r"C:\Program Files (x86)\Mozilla Firefox\firefox.exe"],
+        ],
+        "edge": [
+            ["msedge"],
+            [r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"],
+            [r"C:\Program Files\Microsoft\Edge\Application\msedge.exe"],
+        ],
+    },
+    "darwin": {
+        "chrome": [["open", "-a", "Google Chrome"]],
+        "firefox": [["open", "-a", "Firefox"]],
+        "edge": [["open", "-a", "Microsoft Edge"]],
+    },
+}
+BROWSER_ORDER = ("chrome", "chromium", "firefox", "edge")
+BLOCKED_BROWSER_VALUES = {"default", "system", "brave", "brave-browser", "brave.exe"}
 
 
 def run_command(cmd, timeout=DEFAULT_CMD_TIMEOUT, check=False):
@@ -227,8 +279,58 @@ def hotkey(keys):
     pyautogui.hotkey(*keys)
 
 
+def _normalize_browser_name(value):
+    return BROWSER_ALIASES.get((value or "").strip().lower(), (value or "").strip().lower())
+
+
+def _browser_search_order():
+    requested = os.environ.get("NEXUS_BROWSER", "").strip().lower()
+    if requested in BLOCKED_BROWSER_VALUES:
+        raise RuntimeError("NEXUS_BROWSER nao pode usar navegador padrao nem Brave. Use chrome, chromium, firefox ou edge.")
+    alias = _normalize_browser_name(requested)
+    if not alias:
+        return list(BROWSER_ORDER)
+    if alias not in BROWSER_ORDER:
+        raise RuntimeError("Browser nao suportado. Use chrome, chromium, firefox ou edge.")
+    return [alias]
+
+
+def _command_exists(command):
+    executable = command[0]
+    if executable == "open":
+        return shutil.which("open") is not None
+    return Path(executable).exists() or shutil.which(executable) is not None
+
+
+def resolve_browser_command():
+    commands = BROWSER_COMMANDS.get(SYSTEM, {})
+    for alias in _browser_search_order():
+        for command in commands.get(alias, []):
+            if _command_exists(command):
+                return alias, command
+    return None, None
+
+
+def browser_window_candidates():
+    preferred_aliases = _browser_search_order()
+    names = []
+    for alias in preferred_aliases:
+        names.extend(BROWSER_WINDOW_TITLES.get(alias, ()))
+    for alias in BROWSER_ORDER:
+        if alias in preferred_aliases:
+            continue
+        names.extend(BROWSER_WINDOW_TITLES.get(alias, ()))
+    return tuple(dict.fromkeys(names))
+
+
 def open_url(url):
-    return webbrowser.open_new_tab(url)
+    alias, command = resolve_browser_command()
+    if not command:
+        raise RuntimeError(
+            "Nenhum navegador suportado foi encontrado. Instale Chrome, Chromium, Firefox ou Edge, ou defina NEXUS_BROWSER."
+        )
+    subprocess.Popen(command + [url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return alias
 
 
 def open_application(command_or_url):

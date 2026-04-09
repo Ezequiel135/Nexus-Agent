@@ -30,6 +30,10 @@ python -m venv $EnvDir
 Write-Host "[5/6] Instalando dependencias Python"
 & (Join-Path $EnvDir "Scripts\python.exe") -m pip install --upgrade pip
 & (Join-Path $EnvDir "Scripts\python.exe") -m pip install -r (Join-Path $SrcDir "requirements.txt")
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "[WARN] requirements.txt completo falhou. Instalando conjunto minimo..."
+    & (Join-Path $EnvDir "Scripts\python.exe") -m pip install rich litellm requests python-dotenv psutil textual
+}
 
 Write-Host "[6/6] Criando launcher do Windows"
 $batContent = "@echo off`r`n`"" + (Join-Path $EnvDir "Scripts\python.exe") + "`" `"" + (Join-Path $SrcDir "main.py") + "`" %*`r`n"
@@ -42,4 +46,5 @@ if ($profileText -notmatch [regex]::Escape($NexusHome)) {
     Add-Content $PROFILE "`n`$env:Path += ';$NexusHome'"
 }
 
-Write-Host "Instalacao concluida. Abra um novo terminal e rode: nexus start --plain"
+Write-Host "Instalacao concluida. Abra um novo terminal e rode: nexus"
+Write-Host "Na primeira abertura, escolha a UI (Visual ou Plain) e conclua o setup."

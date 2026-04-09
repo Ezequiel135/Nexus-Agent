@@ -9,8 +9,8 @@ class BrowserService:
         self.windows = windows
 
     def open(self, url):
-        runtime.open_url(url)
-        print(f"  \033[1;32mOPEN URL: {url}\033[0m")
+        browser_name = runtime.open_url(url)
+        print(f"  \033[1;32mOPEN URL [{browser_name}]: {url}\033[0m")
         return True
 
     def open_chatgpt(self):
@@ -29,7 +29,7 @@ class BrowserService:
         return self.open(f"https://www.youtube.com/results?search_query={quote_plus(query)}")
 
     def focus_browser(self):
-        for candidate in ("chrome", "google chrome", "brave", "firefox", "edge"):
+        for candidate in runtime.browser_window_candidates():
             if self.windows.focus(candidate):
                 return True
         return False

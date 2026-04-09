@@ -15,6 +15,7 @@ class NexusConfig:
     model_name: str
     password_hash: str
     password_salt: str
+    ui_mode: str = "auto"
 
     def export_runtime_env(self) -> None:
         provider = self.provider.lower()
@@ -62,6 +63,13 @@ def verify_password(password: str, password_hash: str, salt: str) -> bool:
     return secrets.compare_digest(_hash_password(password, salt), password_hash)
 
 
+def normalize_ui_mode(value: str | None) -> str:
+    normalized = (value or "").strip().lower()
+    if normalized in {"visual", "plain"}:
+        return normalized
+    return "auto"
+
+
 def config_exists() -> bool:
     return NexusPaths.config_path.exists()
 
@@ -69,10 +77,13 @@ def config_exists() -> bool:
 def load_config() -> NexusConfig:
     NexusPaths.ensure()
     payload = json.loads(NexusPaths.config_path.read_text(encoding="utf-8"))
+    payload["ui_mode"] = normalize_ui_mode(payload.get("ui_mode"))
     return NexusConfig(**payload)
 
 
 def save_config(config: NexusConfig) -> None:
     NexusPaths.ensure()
-    NexusPaths.config_path.write_text(json.dumps(asdict(config), indent=2), encoding="utf-8")
+    payload = asdict(config)
+    payload["ui_mode"] = normalize_ui_mode(payload.get("ui_mode"))
+    NexusPaths.config_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     os.chmod(NexusPaths.config_path, 0o600)

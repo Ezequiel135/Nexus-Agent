@@ -29,6 +29,7 @@ def _cpu_and_ram() -> str:
 
 @dataclass(slots=True)
 class SetupPayload:
+    ui_mode: str
     provider: str
     api_key: str
     model_name: str
@@ -93,6 +94,16 @@ class SetupApp(App[SetupPayload | None]):
     def compose(self) -> ComposeResult:
         yield Container(
             Static("NEXUS AGENT SETUP OBRIGATORIO", classes="setup-title"),
+            Static("Tipo de UI"),
+            Select(
+                [
+                    ("Visual completa", "visual"),
+                    ("Terminal puro", "plain"),
+                ],
+                value="visual",
+                id="ui_mode",
+                classes="field",
+            ),
             Static("Provider"),
             Select(
                 [
@@ -119,12 +130,13 @@ class SetupApp(App[SetupPayload | None]):
     def on_input_submitted(self, event: Input.Submitted) -> None:
         if event.input.id != "password":
             return
+        ui_mode = self.query_one("#ui_mode", Select).value or "visual"
         provider = self.query_one("#provider", Select).value or "OpenAI"
         api_key = self.query_one("#api_key", Input).value.strip()
         model_name = self.query_one("#model_name", Input).value.strip()
         password = self.query_one("#password", Input).value.strip()
         if not api_key or not model_name or not password:
-            self.notify("Preencha provider, API key, model e senha.")
+            self.notify("Preencha tipo de UI, provider, API key, model e senha.")
             return
         password_hash, salt = create_password_hash(password)
         save_config(
@@ -134,9 +146,10 @@ class SetupApp(App[SetupPayload | None]):
                 model_name=model_name,
                 password_hash=password_hash,
                 password_salt=salt,
+                ui_mode=str(ui_mode),
             )
         )
-        self.exit(SetupPayload(str(provider), api_key, model_name, password))
+        self.exit(SetupPayload(str(ui_mode), str(provider), api_key, model_name, password))
 
 
 class MissionPanel(Static):
@@ -319,7 +332,7 @@ class NexusApp(App[None]):
                     all_logs.append(f"ERRO: {e}")
 
             # Volta luz verde
-            self.call_from_thread(self._set_light, "🟢 LUZ VERDE — missao concluida", "🟢")
+            self.call_from_thread(self._set_light, "🟢 LUZ VERDE — missao concluida")
             self.call_from_thread(self._write_chat, f"[bold green]✅ {summary}[/bold green]")
 
             # Salva na memoria

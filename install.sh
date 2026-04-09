@@ -9,6 +9,7 @@ WRAPPER_PATH="${LOCAL_BIN_DIR}/nexus"
 GLOBAL_WRAPPER_PATH="/usr/local/bin/nexus"
 DEFAULT_REPO_URL="https://github.com/Ezequiel135/Nexus-Agent.git"
 REPO_URL="${NEXUS_REPO_URL:-${DEFAULT_REPO_URL}}"
+AUTO_INSTALL_DEPS="${NEXUS_AUTO_INSTALL_DEPS:-1}"
 
 # Cores
 GREEN='\033[0;32m'
@@ -74,19 +75,46 @@ echo -e "[1/5] Verificando dependencias de sistema..."
 # Dependencias opcionais — avisa mas nao falha
 if [ "$OS" = "linux" ]; then
     MISSING_DEPS=()
-    for dep in git python3-venv python3-pip scrot xdotool tesseract-ocr; do
-        if ! dpkg -l | grep -q "^ii  $dep"; then
-            MISSING_DEPS+=("$dep")
-        fi
-    done
+    if command -v dpkg >/dev/null 2>&1; then
+        for dep in git python3-venv python3-pip scrot xdotool tesseract-ocr; do
+            if ! dpkg -s "$dep" >/dev/null 2>&1; then
+                MISSING_DEPS+=("$dep")
+            fi
+        done
+    else
+        for dep in git scrot xdotool tesseract; do
+            if ! command -v "$dep" >/dev/null 2>&1; then
+                MISSING_DEPS+=("$dep")
+            fi
+        done
+    fi
     if [ ${#MISSING_DEPS[@]} -gt 0 ]; then
         echo -e "${YELLOW}Aviso:${NC} Dependencias faltando: ${MISSING_DEPS[*]}"
-        echo "  Instale com: sudo apt install ${MISSING_DEPS[*]}"
-        echo "  O NEXUS ainda funciona, mas recursos visuais poderao faltar."
-        read -p "Continuar mesmo assim? (s/N) " -n 1 -r
-        echo
-        if [[ ! $REPLY =~ ^[Ss]$ ]]; then
-            exit 1
+        if [ "${AUTO_INSTALL_DEPS}" = "1" ] && command -v apt-get >/dev/null 2>&1 && command -v sudo >/dev/null 2>&1; then
+            echo "  Tentando instalar automaticamente com sudo apt-get..."
+            if sudo apt-get update && sudo apt-get install -y "${MISSING_DEPS[@]}"; then
+                echo -e "${GREEN}[OK]${NC} Dependencias do sistema instaladas automaticamente."
+            else
+                echo -e "${YELLOW}[WARN]${NC} Instalacao automatica falhou."
+                echo "  Instale manualmente com: sudo apt install ${MISSING_DEPS[*]}"
+                read -p "Continuar mesmo assim? (s/N) " -n 1 -r
+                echo
+                if [[ ! $REPLY =~ ^[Ss]$ ]]; then
+                    exit 1
+                fi
+            fi
+        else
+            echo "  Instale com o gerenciador de pacotes da sua distro."
+            if command -v apt-get >/dev/null 2>&1; then
+                echo "  Exemplo Debian/Ubuntu: sudo apt install ${MISSING_DEPS[*]}"
+            fi
+            echo "  Defina NEXUS_AUTO_INSTALL_DEPS=1 para tentativa automatica em sistemas com apt-get."
+            echo "  O NEXUS ainda funciona, mas recursos visuais poderao faltar."
+            read -p "Continuar mesmo assim? (s/N) " -n 1 -r
+            echo
+            if [[ ! $REPLY =~ ^[Ss]$ ]]; then
+                exit 1
+            fi
         fi
     fi
 fi
@@ -181,6 +209,7 @@ echo ""
 echo -e "${CYAN}Como usar:${NC}"
 echo "  1. Abra um NOVO terminal ou ${YELLOW}source ~/.bashrc${NC}"
 echo "  2. Execute: ${YELLOW}nexus${NC}"
-echo "  3. Ou mode plain CLI: ${YELLOW}nexus start --plain${NC}"
+echo "  3. Na primeira abertura, escolha a UI (Visual ou Plain) e conclua o setup"
+echo "  4. Se quiser forcar o terminal puro: ${YELLOW}nexus start --plain${NC}"
 echo ""
 echo -e "${GREEN}Ezequiel 135${NC}"
