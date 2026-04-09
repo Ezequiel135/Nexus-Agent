@@ -579,6 +579,9 @@ def should_use_plain_mode(force_plain: bool, config=None) -> bool:
 
 def handle_start(task: str | None, plain: bool = False) -> int:
     ensure_config()
+    if not config_exists():
+        print("Configuracao inicial nao concluida. Rode nexus setup e finalize o formulario.")
+        return 1
     config = load_config()
     if config.active_account is None:
         print("Nenhuma conta ativa. Rode nexus login para entrar em uma conta ou nexus setup para reconfigurar.")

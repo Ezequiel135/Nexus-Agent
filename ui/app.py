@@ -102,7 +102,7 @@ class SetupApp(App[SetupPayload | None]):
     .setup-title { color: ansi_bright_green; text-style: bold; }
     .field { margin-bottom: 1; }
     .setup-section { border: round #245c7a; padding: 1; margin-bottom: 1; background: #0b1722; }
-    .setup-section-title { color: bright_cyan; text-style: bold; margin-bottom: 1; }
+    .setup-section-title { color: ansi_bright_cyan; text-style: bold; margin-bottom: 1; }
     .setup-help { color: #a8c7d8; margin-bottom: 1; }
     .hidden { display: none; }
     """
