@@ -101,6 +101,9 @@ class SetupApp(App[SetupPayload | None]):
     #setup-wrap { width: 80; height: auto; border: round cyan; padding: 1 2; margin: 2 4; }
     .setup-title { color: ansi_bright_green; text-style: bold; }
     .field { margin-bottom: 1; }
+    .setup-section { border: round #245c7a; padding: 1; margin-bottom: 1; background: #0b1722; }
+    .setup-section-title { color: bright_cyan; text-style: bold; margin-bottom: 1; }
+    .setup-help { color: #a8c7d8; margin-bottom: 1; }
     .hidden { display: none; }
     """
 
@@ -133,14 +136,27 @@ class SetupApp(App[SetupPayload | None]):
                 classes="field",
             ),
             Container(
-                Static("Base URL / Endpoint"),
-                Input(placeholder="https://api.exemplo.com/v1", id="base_url", classes="field"),
+                Static("Credenciais da conta", classes="setup-section-title"),
+                Static("A API Key fica em uma caixa separada da URL do provider.", classes="setup-help"),
+                Static("API Key"),
+                Input(password=True, id="api_key", classes="field"),
+                id="api-key-wrap",
+                classes="setup-section",
+            ),
+            Container(
+                Static("Provider custom / Outro", classes="setup-section-title"),
+                Static(
+                    "Preencha em caixas separadas: nome do provider e Base URL / Endpoint. "
+                    "Nao junte URL com API Key.",
+                    classes="setup-help",
+                ),
                 Static("Nome/ID do provider custom"),
                 Input(placeholder="openai / openrouter / provider interno", id="custom_provider", classes="field"),
+                Static("Base URL / Endpoint"),
+                Input(placeholder="https://api.exemplo.com/v1", id="base_url", classes="field"),
                 id="custom-provider-wrap",
+                classes="setup-section",
             ),
-            Static("API Key"),
-            Input(password=True, id="api_key", classes="field"),
             Static("Model Name"),
             Input(placeholder="gpt-4o-mini / claude-3-5-sonnet / llama3", id="model_name", classes="field"),
             Static("Nome do agente inicial"),
@@ -170,8 +186,8 @@ class SetupApp(App[SetupPayload | None]):
         ui_mode = self.query_one("#ui_mode", Select).value or "visual"
         account_name = self.query_one("#account_name", Input).value.strip() or "Conta principal"
         provider = self.query_one("#provider", Select).value or "OpenAI"
-        base_url = self.query_one("#base_url", Input).value.strip()
         custom_provider = self.query_one("#custom_provider", Input).value.strip()
+        base_url = self.query_one("#base_url", Input).value.strip()
         api_key = self.query_one("#api_key", Input).value.strip()
         model_name = self.query_one("#model_name", Input).value.strip()
         agent_name = self.query_one("#agent_name", Input).value.strip() or "Agente principal"

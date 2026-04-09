@@ -121,12 +121,28 @@ def prompt_account_config(
     provider = parse_provider_choice(raw, providers)
 
     account_name = console.input(f"[bold cyan]Nome da conta[/bold cyan] [{default_name}]: ").strip() or default_name
-    api_key = console.input("[bold cyan]API Key:[/bold cyan] ").strip()
-    model_name = console.input("[bold cyan]Model Name:[/bold cyan] ").strip()
-    base_url = console.input("[bold cyan]Base URL / Endpoint (opcional):[/bold cyan] ").strip()
     custom_provider = ""
+    base_url = ""
+
     if provider == "Custom":
-        custom_provider = console.input("[bold cyan]Nome/ID do provider custom (opcional):[/bold cyan] ").strip()
+        console.print(
+            Panel.fit(
+                "[bold cyan]Provider custom / Outro[/bold cyan]\n"
+                "Preencha cada dado em uma caixa separada.\n"
+                "1. Nome/ID do provider\n"
+                "2. Base URL / Endpoint\n"
+                "3. API Key",
+                border_style="bright_cyan",
+            )
+        )
+        custom_provider = console.input("[bold cyan]Nome/ID do provider custom:[/bold cyan] ").strip()
+        base_url = console.input("[bold cyan]Base URL / Endpoint do provider:[/bold cyan] ").strip()
+        console.print("[dim]Agora informe a credencial da conta, separada da URL acima.[/dim]")
+
+    api_key = console.input("[bold cyan]API Key da conta:[/bold cyan] ").strip()
+    model_name = console.input("[bold cyan]Model Name:[/bold cyan] ").strip()
+    if provider != "Custom":
+        base_url = console.input("[bold cyan]Base URL / Endpoint (opcional):[/bold cyan] ").strip()
 
     validate_account_inputs(provider, api_key, model_name, base_url)
     return make_account(
