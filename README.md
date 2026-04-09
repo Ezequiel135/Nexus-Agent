@@ -19,19 +19,26 @@ Inspirado no fluxo de trabalho do Codex e Claude Code — mas com cérebro de ve
 ## 📑 Índice
 
 - [O que é](#o-que-é)
+- [Resumo Rápido](#resumo-rápido)
 - [Por que usar](#por-que-usar)
 - [Recursos](#recursos)
 - [MCP](#mcp)
 - [Notebook + Bots Remotos](#notebook--bots-remotos)
 - [Arquitetura](#arquitetura)
 - [Instalação](#instalação)
+- [Atualização](#atualização)
 - [Uso](#uso)
 - [Ferramentas](#ferramentas)
 - [Modo Missão](#modo-missão)
 - [Segurança](#segurança)
-- [Comandos](#comandos)
-- [Estrutura](#estrutura)
+- [Comandos Principais](#comandos-principais)
+- [Arquivos do Usuário](#arquivos-do-usuário)
+- [Estrutura do Projeto](#estrutura-do-projeto)
 - [Troubleshooting](#troubleshooting)
+- [Roadmap](#roadmap)
+- [Sistema de Versionamento](#sistema-de-versionamento-calver)
+- [Contribuindo](#contribuindo)
+- [Licença](#licença)
 
 ---
 
@@ -40,6 +47,27 @@ Inspirado no fluxo de trabalho do Codex e Claude Code — mas com cérebro de ve
 O **NEXUS AGENT** é um agente de autonomia local que roda no terminal, conversa com você em linguagem natural e executa tarefas reais no seu computador — com shell, arquivos, mouse, teclado e visão de tela.
 
 Diferente de assistentes que só respondem, o Nexus **planeja, age e reporta**. Ele transforma objetivos complexos ("organiza minha pasta de downloads") em planos detalhados e executa cada passo autonomamente.
+
+---
+
+## Resumo Rápido
+
+- **Objetivo:** executar tarefas reais no computador a partir de linguagem natural.
+- **Interface:** modo visual com Textual e modo plain orientado a terminal.
+- **Capacidades:** shell, arquivos, OCR, mouse, teclado, memória, MCP, notebooks e bots remotos.
+- **Escala:** múltiplas contas, múltiplos agentes e execução paralela.
+- **Segurança:** comandos avaliados por Luz Verde antes da execução.
+- **Versão atual:** `26.1.0`, com versionamento CalVer.
+
+### Quick Start
+
+```bash
+git clone https://github.com/Ezequiel135/Nexus-Agent.git
+cd Nexus-Agent
+chmod +x install.sh nexus
+./install.sh
+nexus
+```
 
 ---
 
@@ -305,6 +333,49 @@ nexus start --plain
 
 ---
 
+## Atualização
+
+O NEXUS AGENT inclui um fluxo de atualização pensado para instalações feitas pelo próprio projeto.
+
+### Atualização recomendada
+
+```bash
+nexus update
+```
+
+Esse comando:
+
+- sincroniza o código da instalação com o branch `main`
+- usa a URL salva em `~/.nexus/repo.txt`
+- tenta reinstalar dependências do ambiente virtual local do Nexus
+
+### Atualização manual do clone local
+
+Se você estiver executando direto do repositório:
+
+```bash
+git pull origin main
+python3 -m pip install -r requirements.txt
+```
+
+### Atualização manual da instalação em `~/.nexus`
+
+```bash
+git -C ~/.nexus/src pull origin main
+~/.nexus/env/bin/python -m pip install -r ~/.nexus/src/requirements.txt
+```
+
+### Verificação pós-update
+
+```bash
+nexus doctor
+type -a nexus
+```
+
+Use `type -a nexus` para confirmar que o shell está chamando o launcher correto, principalmente se você já teve outro projeto usando o mesmo nome.
+
+---
+
 ## Uso
 
 ### Primeiro Acesso
@@ -549,6 +620,7 @@ nexus start --plain            # Inicia modo terminal puro
 nexus start --task "objetivo"  # Executa tarefa inicial
 
 # Manutenção
+nexus update                   # Atualiza a instalação Nexus via git + pip
 nexus uninstall                # Remove instalação local
 ```
 
@@ -572,30 +644,49 @@ O Nexus armazena tudo em `~/.nexus/`:
 
 ## Estrutura do Projeto
 
-```
+```text
 Nexus-Agent/
-├── src/
-│   ├── main.py                    # CLI entry point (nexus)
-│   ├── core/
-│   │   ├── llm.py                 # LiteLLM + PlannerExecutor
-│   │   ├── actions.py             # AcoesAgente (ToolRegistry)
-│   │   ├── mcp.py                 # Cliente MCP
-│   │   ├── notebooks.py           # Integração Jupyter
-│   │   ├── remote.py              # Bots remotos
-│   │   ├── tool_registry.py       # Sistema de ferramentas
-│   │   ├── safeguards.py          # Segurança (Luz Verde)
-│   │   ├── memory.py              # Memória local
-│   │   ├── config.py              # Configuração
-│   │   ├── state.py               # Monitor de atividade
-│   │   └── logging_utils.py       # Logging
-│   ├── ui/
-│   │   ├── app.py                 # Interface Textual (26.1.0)
-│   │   ├── plain_cli.py           # CLI puro
-│   │   └── setup_cli.py           # Setup via terminal
-│   ├── pc_remote_agent/           # Automação de GUI
-│   ├── requirements.txt
-│   └── install.sh                 # Instalador viral
-└── README.md
+├── main.py                        # CLI principal
+├── nexus                          # Launcher local
+├── install.sh                     # Instalador Linux/macOS
+├── install.ps1                    # Instalador Windows
+├── pyproject.toml                 # Metadados e versão CalVer
+├── requirements.txt               # Dependências Python
+├── README.md
+├── core/
+│   ├── llm.py                     # LiteLLM + PlannerExecutor
+│   ├── actions.py                 # AcoesAgente (ToolRegistry)
+│   ├── parallel.py                # Execução paralela de agentes
+│   ├── version.py                 # Helpers de versão e CalVer
+│   ├── mcp.py                     # Cliente MCP
+│   ├── notebooks.py               # Integração Jupyter
+│   ├── remote.py                  # Bots remotos
+│   ├── tool_registry.py           # Sistema de ferramentas
+│   ├── safeguards.py              # Segurança (Luz Verde)
+│   ├── memory.py                  # Memória local
+│   ├── config.py                  # Configuração
+│   ├── state.py                   # Monitor de atividade
+│   └── logging_utils.py           # Logging
+├── ui/
+│   ├── app.py                     # Interface visual com Textual
+│   ├── plain_cli.py               # Interface terminal pura
+│   └── setup_cli.py               # Setup inicial
+├── pc_remote_agent/               # Automação de GUI
+└── tests/                         # Testes unitários
+```
+
+### Estrutura de runtime em `~/.nexus`
+
+```text
+~/.nexus/
+├── config.json                    # Contas, agentes e preferências
+├── history.json                   # Histórico recente
+├── memory.json                    # Memória persistente
+├── activity.json                  # Estado atual do agente
+├── nexus.log                      # Logs de execução
+├── repo.txt                       # URL usada pelo comando update
+├── notebooks/                     # Notebooks criados pelo agente
+└── src/                           # Clone usado pela instalação do Nexus
 ```
 
 ---
@@ -673,7 +764,23 @@ nexus doctor
 nexus start --plain
 ```
 
-### 6. Como desinstalar?
+### 6. Como atualizar corretamente?
+
+**Para instalações feitas com o Nexus:**
+
+```bash
+nexus update
+nexus doctor
+```
+
+**Para uso direto no clone local:**
+
+```bash
+git pull origin main
+python3 -m pip install -r requirements.txt
+```
+
+### 7. Como desinstalar?
 
 ```bash
 nexus uninstall
