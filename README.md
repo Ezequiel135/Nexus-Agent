@@ -78,6 +78,7 @@ Instalador multiplataforma que funciona de primeira:
 - Detecção automática de OS (Linux/macOS)
 - Fallback Python: `python3` → `python` → `python3.10-12`
 - Primeira abertura já entra em setup e deixa escolher entre UI Visual ou Terminal Plain
+- Setup agora aceita várias contas e vários agentes nomeados
 - Cores no terminal, barra de progresso
 - PATH auto-configurado em `~/.bashrc` e `~/.zshrc`
 - Suporte a instalação global (`NEXUS_INSTALL_GLOBAL=1`)
@@ -85,6 +86,11 @@ Instalador multiplataforma que funciona de primeira:
 ### 🌐 Browser Explícito
 As ações de navegador não usam mais o navegador padrão nem Brave. O agente abre URLs apenas em browsers suportados detectados explicitamente: `Chrome`, `Chromium`, `Firefox` ou `Edge`.
 Se quiser forçar um navegador específico, defina `NEXUS_BROWSER=chrome`, `chromium`, `firefox` ou `edge`.
+
+### 👥 Contas e Agentes
+- Dá para ter várias contas com chaves de API diferentes e alternar entre elas com `nexus login` e `nexus logout`
+- Dá para ter vários agentes nomeados, cada um preso a uma conta, com instruções extras próprias
+- O setup aceita `Outro / Custom` para providers com `Base URL / Endpoint` manual
 
 ---
 
@@ -207,10 +213,14 @@ nexus start --plain
 Na primeira execução, o Nexus entra em **modo setup** e pede:
 
 1. **Tipo de UI** — `Visual` ou `Terminal puro`
-2. **Provider** — OpenAI, Anthropic, Google, Ollama, Groq
-3. **API Key** — sua chave do provedor
-4. **Model Name** — ex: `gpt-4o-mini`, `claude-3-5-sonnet`, `llama3`
-5. **Senha Mestra** — protege o modo autônomo
+2. **Nome da conta** — para separar chaves e logins
+3. **Provider** — OpenAI, Anthropic, Google, Ollama, Groq ou `Outro / Custom`
+4. **API Key** — sua chave do provedor
+5. **Model Name** — ex: `gpt-4o-mini`, `claude-3-5-sonnet`, `llama3`
+6. **Base URL / Endpoint** — opcional para providers customizados
+7. **Nome do agente inicial** — primeiro agente da conta
+8. **Instrução extra do agente** — opcional
+9. **Senha Mestra** — protege o modo autônomo
 
 A configuração é salva em `~/.nexus/config.json`.
 
@@ -257,6 +267,8 @@ nexus> Organize meus arquivos baixados separando PDFs, imagens e documentos
 | `/help` | Mostra ajuda |
 | `/init` / `/onboarding` | Tour guiado |
 | `/status` | Status do agente |
+| `/accounts` | Lista contas configuradas |
+| `/agents` | Lista agentes configurados |
 | `/tools` | Lista ferramentas disponíveis |
 | `/memory` | Mostra memória local |
 | `/remember texto` | Salva memória manual |
@@ -369,10 +381,22 @@ Comandos são permitidos dentro de:
 
 ```bash
 # Setup inicial
-nexus setup                    # Configura provider, API, modelo, senha
+nexus setup                    # Recria a configuracao inicial completa
+
+# Contas
+nexus accounts                 # Lista contas configuradas
+nexus login                    # Adiciona nova conta e ativa
+nexus login --account "Conta"  # Troca para uma conta existente
+nexus logout                   # Desativa a conta atual
+
+# Agentes
+nexus agents                   # Lista agentes configurados
+nexus add-agent                # Cria um novo agente
+nexus add-agent --account "Conta"  # Cria agente preso a uma conta especifica
+nexus use-agent "Agente"       # Ativa um agente existente
 
 # Ajuda e diagnóstico
-nexus help                     # Ajuda interativa
+nexus --help                   # Ajuda do CLI
 nexus onboarding               # Tour guiado
 nexus blocked                  # Lista comandos bloqueados
 nexus doctor                   # Diagnóstico do sistema
@@ -395,7 +419,7 @@ O Nexus armazena tudo em `~/.nexus/`:
 
 | Arquivo | Descrição |
 |---------|-----------|
-| `config.json` | Provider, API key, model name |
+| `config.json` | Contas, agentes, provider ativo, model e senha |
 | `history.json` | Histórico recente da conversa (últimas 24 mensagens) |
 | `memory.json` | Memória local persistente (até 200 itens) |
 | `activity.json` | Estado atual do agente |

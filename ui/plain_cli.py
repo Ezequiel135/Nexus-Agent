@@ -62,7 +62,7 @@ class PlainNexusCLI:
             )
         )
         self.console.print(
-            "[dim]Dica: use /help, /tools, /memory, /onboarding, /blocked e /exit[/dim]"
+            "[dim]Dica: use /help, /accounts, /agents, /tools, /memory, /onboarding, /blocked e /exit[/dim]"
         )
 
     def _handle_prompt(self, prompt: str) -> None:
@@ -90,6 +90,8 @@ class PlainNexusCLI:
             table.add_row("/init", "Alias para onboarding")
             table.add_row("/onboarding", "Explica como usar o agente")
             table.add_row("/status", "Mostra status do agente")
+            table.add_row("/accounts", "Lista contas configuradas")
+            table.add_row("/agents", "Lista agentes configurados")
             table.add_row("/tools", "Mostra as ferramentas locais que a IA sabe usar")
             table.add_row("/memory", "Mostra a memoria local salva")
             table.add_row("/remember texto", "Salva uma memoria local manualmente")
@@ -103,11 +105,45 @@ class PlainNexusCLI:
             snap = self.monitor.read()
             self.console.print(
                 Panel.fit(
-                    f"estado={snap.state}\nmodelo={snap.current_model}\nlatencia={snap.api_latency_ms} ms\nautonomous={snap.autonomous_mode}",
+                    f"estado={snap.state}\nmodelo={snap.current_model}\nlatencia={snap.api_latency_ms} ms\n"
+                    f"autonomous={snap.autonomous_mode}\n"
+                    f"conta={(self.bridge.config.active_account.name if self.bridge.config.active_account else '-')}\n"
+                    f"agente={(self.bridge.config.active_agent.name if self.bridge.config.active_agent else '-')}",
                     title="Status",
                     border_style="yellow",
                 )
             )
+            return False
+        if command == "/accounts":
+            table = Table(title="Contas")
+            table.add_column("Ativa", style="cyan", width=5)
+            table.add_column("Conta", style="white")
+            table.add_column("Provider", style="green")
+            table.add_column("Modelo", style="yellow")
+            for account in self.bridge.config.accounts:
+                table.add_row(
+                    "*" if self.bridge.config.active_account_id == account.id else "",
+                    account.name,
+                    account.provider_label,
+                    account.model_name,
+                )
+            self.console.print(table)
+            return False
+        if command == "/agents":
+            table = Table(title="Agentes")
+            table.add_column("Ativo", style="cyan", width=5)
+            table.add_column("Agente", style="white")
+            table.add_column("Conta", style="green")
+            table.add_column("Instrucao", style="yellow")
+            for agent in self.bridge.config.agents:
+                account = next((item for item in self.bridge.config.accounts if item.id == agent.account_id), None)
+                table.add_row(
+                    "*" if self.bridge.config.active_agent_id == agent.id else "",
+                    agent.name,
+                    account.name if account else "-",
+                    agent.system_prompt or "-",
+                )
+            self.console.print(table)
             return False
         if command in {"/init", "/onboarding"}:
             self.console.print(

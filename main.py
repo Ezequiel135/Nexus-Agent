@@ -10,7 +10,20 @@ import sys
 from pathlib import Path
 
 from core.actions import AcoesAgente
-from core.config import NexusPaths, config_exists, load_config, normalize_ui_mode, verify_password
+from core.config import (
+    NexusPaths,
+    activate_account,
+    activate_agent,
+    add_account,
+    add_agent,
+    config_exists,
+    find_account,
+    load_config,
+    logout_account,
+    normalize_ui_mode,
+    save_config,
+    verify_password,
+)
 from core.llm import LiteLLMBridge
 from core.logging_utils import log_event
 from core.safeguards import blocked_examples, blocked_reasons
@@ -52,6 +65,15 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("doctor", help="Mostra diagnostico do terminal e da plataforma")
     sub.add_parser("onboarding", help="Abre a tela de boas-vindas e onboarding")
     sub.add_parser("setup", help="Forca o modo de configuracao inicial")
+    sub.add_parser("accounts", help="Lista as contas configuradas")
+    login = sub.add_parser("login", help="Troca para uma conta existente ou adiciona uma nova")
+    login.add_argument("--account", help="Nome ou ID de uma conta ja existente")
+    sub.add_parser("logout", help="Desloga da conta ativa")
+    sub.add_parser("agents", help="Lista os agentes configurados")
+    add_agent_cmd = sub.add_parser("add-agent", help="Adiciona um novo agente")
+    add_agent_cmd.add_argument("--account", help="Conta dona do agente")
+    use_agent = sub.add_parser("use-agent", help="Ativa um agente existente")
+    use_agent.add_argument("agent", help="Nome ou ID do agente")
     sub.add_parser("uninstall", help="Remove a instalacao local do NEXUS AGENT")
     sub.add_parser("update", help="Atualiza o NEXUS AGENT via git pull")
     return parser
@@ -69,6 +91,7 @@ def handle_blocked() -> int:
 
 
 def handle_doctor() -> int:
+    config = load_config() if config_exists() else None
     print("NEXUS AGENT doctor\n")
     print(f"platform={platform.system()} {platform.release()}")
     print(f"python={sys.version.split()[0]}")
@@ -81,6 +104,11 @@ def handle_doctor() -> int:
     print(f"memory_file={NexusPaths.memory_path}")
     print(f"local_launcher={Path.home() / '.local/bin/nexus'}")
     print(f"global_launcher=/usr/local/bin/nexus")
+    if config is not None:
+        active_account = config.active_account.name if config.active_account else "-"
+        active_agent = config.active_agent.name if config.active_agent else "-"
+        print(f"accounts={len(config.accounts)} active_account={active_account}")
+        print(f"agents={len(config.agents)} active_agent={active_agent}")
     return 0
 
 
@@ -98,6 +126,126 @@ def handle_uninstall() -> int:
             print(f"Removido: {target}")
     print("Desinstalacao local concluida.")
     print("Se existir /usr/local/bin/nexus antigo, remova manualmente com sudo ou rode o install.sh novo para corrigi-lo.")
+    return 0
+
+
+def handle_accounts() -> int:
+    if not config_exists():
+        print("Nenhuma configuracao encontrada. Rode nexus setup.")
+        return 1
+    config = load_config()
+    if not config.accounts:
+        print("Nenhuma conta configurada.")
+        return 1
+    print("Contas configuradas:\n")
+    for account in config.accounts:
+        marker = "*" if config.active_account_id == account.id else " "
+        provider = account.provider_label
+        base = f" | base={account.base_url}" if account.base_url else ""
+        print(f"{marker} {account.name} [{account.id}] | provider={provider} | model={account.model_name}{base}")
+    return 0
+
+
+def handle_login(account_query: str | None = None) -> int:
+    if not config_exists():
+        ensure_config(force_setup=True)
+        return 0
+
+    config = load_config()
+    if account_query:
+        try:
+            account = activate_account(config, account_query)
+        except ValueError as exc:
+            print(str(exc))
+            return 1
+        save_config(config)
+        print(f"Conta ativa alterada para: {account.name}")
+        return 0
+
+    from rich.console import Console
+    from ui.setup_cli import prompt_account_config
+
+    console = Console()
+    default_name = f"Conta {len(config.accounts) + 1}"
+    account = prompt_account_config(console, {item.id for item in config.accounts}, default_name=default_name)
+    add_account(config, account, activate=True)
+    save_config(config)
+    print(f"Nova conta criada e ativada: {account.name}")
+    return 0
+
+
+def handle_logout() -> int:
+    if not config_exists():
+        print("Nenhuma configuracao encontrada.")
+        return 1
+    config = load_config()
+    logout_account(config)
+    save_config(config)
+    print("Conta ativa desconectada. Rode nexus login para entrar em outra conta.")
+    return 0
+
+
+def handle_agents() -> int:
+    if not config_exists():
+        print("Nenhuma configuracao encontrada. Rode nexus setup.")
+        return 1
+    config = load_config()
+    if not config.agents:
+        print("Nenhum agente configurado.")
+        return 1
+    print("Agentes configurados:\n")
+    for agent in config.agents:
+        marker = "*" if config.active_agent_id == agent.id else " "
+        account = find_account(config, agent.account_id)
+        account_name = account.name if account is not None else "-"
+        extra = f" | prompt={agent.system_prompt}" if agent.system_prompt else ""
+        print(f"{marker} {agent.name} [{agent.id}] | conta={account_name}{extra}")
+    return 0
+
+
+def handle_add_agent(account_query: str | None = None) -> int:
+    if not config_exists():
+        print("Nenhuma configuracao encontrada. Rode nexus setup primeiro.")
+        return 1
+    config = load_config()
+    if not config.accounts:
+        print("Nenhuma conta configurada. Rode nexus login para criar uma conta.")
+        return 1
+
+    account = find_account(config, account_query) if account_query else (config.active_account or config.accounts[0])
+    if account is None:
+        print(f"Conta nao encontrada: {account_query}")
+        return 1
+
+    from rich.console import Console
+    from ui.setup_cli import prompt_agent_config
+
+    console = Console()
+    default_name = f"Agente {len(config.agents) + 1}"
+    agent = prompt_agent_config(
+        console,
+        account_id=account.id,
+        existing_ids={item.id for item in config.agents},
+        default_name=default_name,
+    )
+    add_agent(config, agent, activate=True)
+    save_config(config)
+    print(f"Agente criado e ativado: {agent.name} (conta: {account.name})")
+    return 0
+
+
+def handle_use_agent(agent_query: str) -> int:
+    if not config_exists():
+        print("Nenhuma configuracao encontrada.")
+        return 1
+    config = load_config()
+    try:
+        agent = activate_agent(config, agent_query)
+    except ValueError as exc:
+        print(str(exc))
+        return 1
+    save_config(config)
+    print(f"Agente ativo alterado para: {agent.name}")
     return 0
 
 
@@ -137,6 +285,9 @@ def should_use_plain_mode(force_plain: bool, config=None) -> bool:
 def handle_start(task: str | None, plain: bool = False) -> int:
     ensure_config()
     config = load_config()
+    if config.active_account is None:
+        print("Nenhuma conta ativa. Rode nexus login para entrar em uma conta ou nexus setup para reconfigurar.")
+        return 1
     use_plain_mode = should_use_plain_mode(plain, config)
     monitor = ActivityMonitor()
     monitor.start()
@@ -212,6 +363,18 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "setup":
         ensure_config(force_setup=True)
         return 0
+    if args.command == "accounts":
+        return handle_accounts()
+    if args.command == "login":
+        return handle_login(args.account)
+    if args.command == "logout":
+        return handle_logout()
+    if args.command == "agents":
+        return handle_agents()
+    if args.command == "add-agent":
+        return handle_add_agent(args.account)
+    if args.command == "use-agent":
+        return handle_use_agent(args.agent)
     if args.command == "blocked":
         return handle_blocked()
     if args.command == "doctor":

@@ -29,6 +29,29 @@ PLANNER_PROMPT = (
 )
 
 
+def runtime_prompt(config: NexusConfig) -> str:
+    parts: list[str] = []
+    account = config.active_account
+    agent = config.active_agent
+    if account is not None:
+        parts.append(f"Conta ativa: {account.name}. Provider: {account.provider_label}. Modelo: {account.model_name}.")
+    if agent is not None:
+        parts.append(f"Agente ativo: {agent.name}.")
+        if agent.system_prompt:
+            parts.append(f"Instrucoes extras do agente: {agent.system_prompt}")
+    return " ".join(parts).strip()
+
+
+def system_prompt(config: NexusConfig) -> str:
+    extra = runtime_prompt(config)
+    return f"{SYSTEM_PROMPT} {extra}".strip() if extra else SYSTEM_PROMPT
+
+
+def planner_prompt(config: NexusConfig) -> str:
+    extra = runtime_prompt(config)
+    return f"{PLANNER_PROMPT} {extra}".strip() if extra else PLANNER_PROMPT
+
+
 class PlannerExecutor:
     def __init__(self, config: NexusConfig, monitor: ActivityMonitor, actions: AcoesAgente) -> None:
         self.config = config
@@ -44,7 +67,7 @@ class PlannerExecutor:
             raise RuntimeError("LiteLLM nao esta instalado no ambiente atual.") from exc
 
         started = time.perf_counter()
-        response = completion(model=self.config.model_name, messages=messages)
+        response = completion(model=self.config.model_name, messages=messages, **self.config.completion_kwargs())
         latency_ms = int((time.perf_counter() - started) * 1000)
         self.monitor.set_latency(latency_ms)
         return response
@@ -63,9 +86,9 @@ class PlannerExecutor:
         return response
 
     def _create_plan(self, goal: str) -> list[dict[str, Any]]:
-        prompt = f"{PLANNER_PROMPT}\n\nObjetivo: {goal}\n\nFerramentas disponiveis:\n{self.actions.capabilities_summary()}"
+        prompt = f"{planner_prompt(self.config)}\n\nObjetivo: {goal}\n\nFerramentas disponiveis:\n{self.actions.capabilities_summary()}"
         messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt(self.config)},
             {"role": "user", "content": prompt},
         ]
         resp = self._chat(messages)
@@ -145,7 +168,12 @@ class LiteLLMBridge:
             raise RuntimeError("LiteLLM nao esta instalado no ambiente atual.") from exc
 
         started = time.perf_counter()
-        response = completion(model=self.config.model_name, messages=messages, tools=tools)
+        response = completion(
+            model=self.config.model_name,
+            messages=messages,
+            tools=tools,
+            **self.config.completion_kwargs(),
+        )
         latency_ms = int((time.perf_counter() - started) * 1000)
         self.monitor.set_latency(latency_ms)
         return response
@@ -174,11 +202,14 @@ class LiteLLMBridge:
         return payload
 
     def handshake(self) -> tuple[bool, str]:
+        if self.config.active_account is None:
+            self.monitor.set_state("error", "Nenhuma conta ativa")
+            return False, "Nenhuma conta ativa. Rode nexus login ou nexus setup."
         try:
             self.monitor.set_state("thinking")
             response = self._completion(
                 [
-                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "system", "content": system_prompt(self.config)},
                     {"role": "user", "content": "Responda apenas: NEXUS ONLINE"},
                 ]
             )
@@ -190,8 +221,10 @@ class LiteLLMBridge:
             return False, "ERRO DE COMUNICACAO: VERIFIQUE SUA COTA OU CHAVE DE API."
 
     def chat(self, conversation: list[dict[str, Any]], max_rounds: int = 6) -> tuple[str, list[str]]:
+        if self.config.active_account is None:
+            raise RuntimeError("Nenhuma conta ativa. Rode nexus login ou nexus setup.")
         messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt(self.config)},
             {"role": "system", "content": self.actions.capabilities_summary()},
             {"role": "system", "content": memory_summary()},
             *conversation,

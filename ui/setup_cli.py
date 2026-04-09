@@ -7,7 +7,17 @@ import sys
 from rich.console import Console
 from rich.panel import Panel
 
-from core.config import NexusConfig, create_password_hash, normalize_ui_mode, save_config
+from core.config import (
+    KNOWN_PROVIDERS,
+    NexusConfig,
+    build_initial_config,
+    create_password_hash,
+    make_account,
+    make_agent,
+    normalize_provider,
+    normalize_ui_mode,
+    save_config,
+)
 
 
 def run_plain_setup() -> None:
@@ -21,43 +31,67 @@ def run_plain_setup() -> None:
     )
 
     if not sys.stdin.isatty():
-        ui_mode = normalize_ui_mode(os.environ.get("NEXUS_UI_MODE"))
-        if ui_mode == "auto":
-            ui_mode = "visual"
-        provider = os.environ.get("NEXUS_PROVIDER", "OpenAI").strip() or "OpenAI"
-        api_key = os.environ.get("NEXUS_API_KEY", "").strip()
-        model_name = os.environ.get("NEXUS_MODEL_NAME", "").strip()
-        password = os.environ.get("NEXUS_PASSWORD", "").strip()
-        if not api_key or not model_name or not password:
-            raise SystemExit(
-                "Setup interativo indisponivel sem TTY. "
-                "Abra o comando em um terminal real ou defina NEXUS_PROVIDER, NEXUS_API_KEY, NEXUS_MODEL_NAME, NEXUS_PASSWORD e opcionalmente NEXUS_UI_MODE."
-            )
+        config = build_setup_config_from_env()
     else:
-        ui_mode = _prompt_ui_mode(console)
-        provider = _prompt_provider(console)
-        api_key = console.input("[bold cyan]API Key:[/bold cyan] ").strip()
-        model_name = console.input("[bold cyan]Model Name:[/bold cyan] ").strip()
-        password = getpass.getpass("NEXUS Password: ").strip()
+        config = prompt_initial_config(console)
 
-    if not api_key or not model_name or not password:
-        raise SystemExit("Setup cancelado: provider, API key, model e senha sao obrigatorios.")
-
-    password_hash, salt = create_password_hash(password)
-    save_config(
-        NexusConfig(
-            provider=provider,
-            api_key=api_key,
-            model_name=model_name,
-            password_hash=password_hash,
-            password_salt=salt,
-            ui_mode=ui_mode,
-        )
-    )
+    save_config(config)
     console.print("[bold green]Configuracao salva com sucesso.[/bold green]")
 
 
-def _prompt_ui_mode(console: Console) -> str:
+def build_setup_config_from_env() -> NexusConfig:
+    ui_mode = normalize_ui_mode(os.environ.get("NEXUS_UI_MODE"))
+    if ui_mode == "auto":
+        ui_mode = "visual"
+
+    password = os.environ.get("NEXUS_PASSWORD", "").strip()
+    account_name = os.environ.get("NEXUS_ACCOUNT_NAME", "").strip() or "Conta principal"
+    agent_name = os.environ.get("NEXUS_AGENT_NAME", "").strip() or "Agente principal"
+    agent_prompt = os.environ.get("NEXUS_AGENT_PROMPT", "").strip()
+    provider = normalize_provider(os.environ.get("NEXUS_PROVIDER", "OpenAI"))
+    api_key = os.environ.get("NEXUS_API_KEY", "").strip()
+    model_name = os.environ.get("NEXUS_MODEL_NAME", "").strip()
+    base_url = os.environ.get("NEXUS_BASE_URL", "").strip()
+    custom_provider = os.environ.get("NEXUS_CUSTOM_PROVIDER", "").strip()
+
+    validate_account_inputs(provider, api_key, model_name, base_url)
+    if not password:
+        raise SystemExit(
+            "Setup interativo indisponivel sem TTY. "
+            "Defina NEXUS_PASSWORD, NEXUS_PROVIDER, NEXUS_API_KEY, NEXUS_MODEL_NAME e opcionalmente "
+            "NEXUS_ACCOUNT_NAME, NEXUS_AGENT_NAME, NEXUS_AGENT_PROMPT, NEXUS_BASE_URL e NEXUS_CUSTOM_PROVIDER."
+        )
+
+    password_hash, salt = create_password_hash(password)
+    account = make_account(
+        name=account_name,
+        provider=provider,
+        api_key=api_key,
+        model_name=model_name,
+        base_url=base_url,
+        custom_provider=custom_provider,
+    )
+    agent = make_agent(name=agent_name, account_id=account.id, system_prompt=agent_prompt)
+    return build_initial_config(password_hash, salt, ui_mode, account, agent)
+
+
+def prompt_initial_config(console: Console) -> NexusConfig:
+    ui_mode = prompt_ui_mode(console)
+    account = prompt_account_config(console, existing_ids=set(), default_name="Conta principal")
+    agent = prompt_agent_config(
+        console,
+        account_id=account.id,
+        existing_ids=set(),
+        default_name="Agente principal",
+    )
+    password = getpass.getpass("NEXUS Password: ").strip()
+    if not password:
+        raise SystemExit("Setup cancelado: senha obrigatoria.")
+    password_hash, salt = create_password_hash(password)
+    return build_initial_config(password_hash, salt, ui_mode, account, agent)
+
+
+def prompt_ui_mode(console: Console) -> str:
     options = [("visual", "Visual completa"), ("plain", "Terminal puro")]
     console.print("[bold yellow]Escolha o tipo de interface:[/bold yellow]")
     for index, (_mode, label) in enumerate(options, start=1):
@@ -73,18 +107,71 @@ def _prompt_ui_mode(console: Console) -> str:
     return "visual"
 
 
-def _prompt_provider(console: Console) -> str:
-    providers = ["OpenAI", "Anthropic", "Google", "Ollama", "Groq"]
+def prompt_account_config(
+    console: Console,
+    existing_ids: set[str],
+    default_name: str = "Conta",
+) -> object:
+    providers = list(KNOWN_PROVIDERS)
     console.print("[bold yellow]Escolha o provider:[/bold yellow]")
     for index, name in enumerate(providers, start=1):
-        console.print(f"{index}. {name}")
-    raw = console.input("[bold cyan]Provider [1-5]:[/bold cyan] ").strip()
+        label = "Outro / Custom" if name == "Custom" else name
+        console.print(f"{index}. {label}")
+    raw = console.input(f"[bold cyan]Provider [1-{len(providers)}]:[/bold cyan] ").strip()
+    provider = parse_provider_choice(raw, providers)
+
+    account_name = console.input(f"[bold cyan]Nome da conta[/bold cyan] [{default_name}]: ").strip() or default_name
+    api_key = console.input("[bold cyan]API Key:[/bold cyan] ").strip()
+    model_name = console.input("[bold cyan]Model Name:[/bold cyan] ").strip()
+    base_url = console.input("[bold cyan]Base URL / Endpoint (opcional):[/bold cyan] ").strip()
+    custom_provider = ""
+    if provider == "Custom":
+        custom_provider = console.input("[bold cyan]Nome/ID do provider custom (opcional):[/bold cyan] ").strip()
+
+    validate_account_inputs(provider, api_key, model_name, base_url)
+    return make_account(
+        name=account_name,
+        provider=provider,
+        api_key=api_key,
+        model_name=model_name,
+        base_url=base_url,
+        custom_provider=custom_provider,
+        existing_ids=existing_ids,
+    )
+
+
+def prompt_agent_config(
+    console: Console,
+    account_id: str,
+    existing_ids: set[str],
+    default_name: str = "Agente",
+) -> object:
+    agent_name = console.input(f"[bold cyan]Nome do agente[/bold cyan] [{default_name}]: ").strip() or default_name
+    system_prompt = console.input(
+        "[bold cyan]Instrucao extra do agente (opcional):[/bold cyan] "
+    ).strip()
+    return make_agent(
+        name=agent_name,
+        account_id=account_id,
+        system_prompt=system_prompt,
+        existing_ids=existing_ids,
+    )
+
+
+def parse_provider_choice(raw: str, providers: list[str]) -> str:
     if raw.isdigit():
         selected = int(raw)
         if 1 <= selected <= len(providers):
             return providers[selected - 1]
     if raw:
-        for name in providers:
-            if raw.lower() == name.lower():
-                return name
+        normalized = normalize_provider(raw)
+        if normalized in providers:
+            return normalized
     return "OpenAI"
+
+
+def validate_account_inputs(provider: str, api_key: str, model_name: str, base_url: str) -> None:
+    if not api_key or not model_name:
+        raise SystemExit("Setup cancelado: API key e model sao obrigatorios.")
+    if normalize_provider(provider) == "Custom" and not base_url.strip():
+        raise SystemExit("Setup cancelado: provider custom exige Base URL / Endpoint.")

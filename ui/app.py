@@ -12,7 +12,17 @@ from textual.containers import Container, Horizontal, Vertical
 from textual.widgets import Footer, Input, RichLog, Select, Static
 
 from core.actions import AcoesAgente
-from core.config import NexusConfig, NexusPaths, create_password_hash, save_config
+from core.config import (
+    KNOWN_PROVIDERS,
+    NexusConfig,
+    NexusPaths,
+    build_initial_config,
+    create_password_hash,
+    make_account,
+    make_agent,
+    normalize_provider,
+    save_config,
+)
 from core.llm import LiteLLMBridge
 from core.logging_utils import log_event
 from core.state import ActivityMonitor, LIGHT_COLORS, LIGHT_SYMBOLS
@@ -30,9 +40,10 @@ def _cpu_and_ram() -> str:
 @dataclass(slots=True)
 class SetupPayload:
     ui_mode: str
+    account_name: str
     provider: str
-    api_key: str
     model_name: str
+    agent_name: str
     password: str
 
 
@@ -64,9 +75,10 @@ class NexusHeader(Static):
 
 
 class StatusBar(Static):
-    def __init__(self, monitor: ActivityMonitor) -> None:
+    def __init__(self, monitor: ActivityMonitor, config: NexusConfig | None = None) -> None:
         super().__init__()
         self.monitor = monitor
+        self.config = config
 
     def on_mount(self) -> None:
         self.set_interval(1.0, self.refresh_status)
@@ -75,9 +87,11 @@ class StatusBar(Static):
     def refresh_status(self) -> None:
         snap = self.monitor.read()
         mode = "MISSION_MODE=ON" if snap.autonomous_mode else "AUTO=OFF"
+        account_name = self.config.active_account.name if self.config and self.config.active_account else "-"
+        agent_name = self.config.active_agent.name if self.config and self.config.active_agent else "-"
         self.update(
             f"[black on bright_cyan] Modelo: {snap.current_model} | Latencia: {snap.api_latency_ms} ms | "
-            f"{_cpu_and_ram()} | {mode} | Ezequiel 135 [/]"
+            f"{_cpu_and_ram()} | conta={account_name} | agente={agent_name} | {mode} | Ezequiel 135 [/]"
         )
 
 
@@ -87,11 +101,16 @@ class SetupApp(App[SetupPayload | None]):
     #setup-wrap { width: 80; height: auto; border: round cyan; padding: 1 2; margin: 2 4; }
     .setup-title { color: ansi_bright_green; text-style: bold; }
     .field { margin-bottom: 1; }
+    .hidden { display: none; }
     """
 
     BINDINGS = [("ctrl+c", "quit", "Sair")]
 
     def compose(self) -> ComposeResult:
+        provider_options = []
+        for provider in KNOWN_PROVIDERS:
+            label = "Outro / Custom" if provider == "Custom" else provider
+            provider_options.append((label, provider))
         yield Container(
             Static("NEXUS AGENT SETUP OBRIGATORIO", classes="setup-title"),
             Static("Tipo de UI"),
@@ -104,52 +123,82 @@ class SetupApp(App[SetupPayload | None]):
                 id="ui_mode",
                 classes="field",
             ),
+            Static("Nome da conta"),
+            Input(value="Conta principal", id="account_name", classes="field"),
             Static("Provider"),
             Select(
-                [
-                    ("OpenAI", "OpenAI"),
-                    ("Anthropic", "Anthropic"),
-                    ("Google", "Google"),
-                    ("Ollama", "Ollama"),
-                    ("Groq", "Groq"),
-                ],
+                provider_options,
                 value="OpenAI",
                 id="provider",
                 classes="field",
+            ),
+            Container(
+                Static("Base URL / Endpoint"),
+                Input(placeholder="https://api.exemplo.com/v1", id="base_url", classes="field"),
+                Static("Nome/ID do provider custom"),
+                Input(placeholder="openai / openrouter / provider interno", id="custom_provider", classes="field"),
+                id="custom-provider-wrap",
             ),
             Static("API Key"),
             Input(password=True, id="api_key", classes="field"),
             Static("Model Name"),
             Input(placeholder="gpt-4o-mini / claude-3-5-sonnet / llama3", id="model_name", classes="field"),
+            Static("Nome do agente inicial"),
+            Input(value="Agente principal", id="agent_name", classes="field"),
+            Static("Instrucao extra do agente (opcional)"),
+            Input(placeholder="Ex: foco em automacao, organizacao e resposta curta", id="agent_prompt", classes="field"),
             Static("NEXUS Password"),
             Input(password=True, id="password", classes="field"),
             Static("Pressione Enter no campo de senha para concluir."),
             id="setup-wrap",
         )
 
+    def on_mount(self) -> None:
+        self._toggle_custom_provider_fields()
+
+    def on_select_changed(self, event: Select.Changed) -> None:
+        if event.select.id == "provider":
+            self._toggle_custom_provider_fields()
+
+    def _toggle_custom_provider_fields(self) -> None:
+        provider = str(self.query_one("#provider", Select).value or "OpenAI")
+        self.query_one("#custom-provider-wrap", Container).display = normalize_provider(provider) == "Custom"
+
     def on_input_submitted(self, event: Input.Submitted) -> None:
         if event.input.id != "password":
             return
         ui_mode = self.query_one("#ui_mode", Select).value or "visual"
+        account_name = self.query_one("#account_name", Input).value.strip() or "Conta principal"
         provider = self.query_one("#provider", Select).value or "OpenAI"
+        base_url = self.query_one("#base_url", Input).value.strip()
+        custom_provider = self.query_one("#custom_provider", Input).value.strip()
         api_key = self.query_one("#api_key", Input).value.strip()
         model_name = self.query_one("#model_name", Input).value.strip()
+        agent_name = self.query_one("#agent_name", Input).value.strip() or "Agente principal"
+        agent_prompt = self.query_one("#agent_prompt", Input).value.strip()
         password = self.query_one("#password", Input).value.strip()
         if not api_key or not model_name or not password:
-            self.notify("Preencha tipo de UI, provider, API key, model e senha.")
+            self.notify("Preencha conta, provider, API key, model, agente e senha.")
+            return
+        if normalize_provider(str(provider)) == "Custom" and not base_url:
+            self.notify("Provider custom exige Base URL / Endpoint.")
             return
         password_hash, salt = create_password_hash(password)
-        save_config(
-            NexusConfig(
-                provider=str(provider),
-                api_key=api_key,
-                model_name=model_name,
-                password_hash=password_hash,
-                password_salt=salt,
-                ui_mode=str(ui_mode),
-            )
+        account = make_account(
+            name=account_name,
+            provider=str(provider),
+            api_key=api_key,
+            model_name=model_name,
+            base_url=base_url,
+            custom_provider=custom_provider,
         )
-        self.exit(SetupPayload(str(ui_mode), str(provider), api_key, model_name, password))
+        agent = make_agent(
+            name=agent_name,
+            account_id=account.id,
+            system_prompt=agent_prompt,
+        )
+        save_config(build_initial_config(password_hash, salt, str(ui_mode), account, agent))
+        self.exit(SetupPayload(str(ui_mode), account_name, str(provider), model_name, agent_name, password))
 
 
 class MissionPanel(Static):
@@ -208,9 +257,9 @@ class NexusApp(App[None]):
                 yield Input(placeholder="Digite um objetivo ou comando para o Nexus...", id="prompt")
             with Vertical(id="log-panel"):
                 yield Static("Action & Log Panel", classes="panel-title")
-                yield Static("Comandos uteis: onboarding | blocked | update | uninstall", classes="hint-box")
+                yield Static("Comandos uteis: onboarding | blocked | update | accounts | agents", classes="hint-box")
                 yield RichLog(id="action-log", markup=True, wrap=True)
-        yield StatusBar(self.monitor)
+        yield StatusBar(self.monitor, self.bridge.config)
         yield Footer()
 
     def on_mount(self) -> None:
@@ -223,6 +272,10 @@ class NexusApp(App[None]):
             "Descreva um objetivo (ex: 'organiza minha pasta Downloads') e o NEXUS PLANEJA + EXECUTA."
         )
         self._write_log(message)
+        if self.bridge.config.active_account is not None:
+            self._write_log(f"Conta ativa: {self.bridge.config.active_account.name}")
+        if self.bridge.config.active_agent is not None:
+            self._write_log(f"Agente ativo: {self.bridge.config.active_agent.name}")
         self._write_log("Modo Missao: decomposicao automatica de tarefas. Marca d'agua: Ezequiel 135")
         if self.initial_task:
             self.query_one("#prompt", Input).value = self.initial_task
