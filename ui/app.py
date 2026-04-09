@@ -98,12 +98,14 @@ class StatusBar(Static):
 class SetupApp(App[SetupPayload | None]):
     CSS = """
     Screen { background: black; color: white; }
-    #setup-wrap { width: 80; height: auto; border: round cyan; padding: 1 2; margin: 2 4; }
+    #setup-wrap { width: 108; height: auto; border: round cyan; padding: 1 2; margin: 1 2; }
     .setup-title { color: ansi_bright_green; text-style: bold; }
-    .field { margin-bottom: 1; }
+    .field { margin-bottom: 1; width: 1fr; height: 3; }
     .setup-section { border: round #245c7a; padding: 1; margin-bottom: 1; background: #0b1722; }
     .setup-section-title { color: ansi_bright_cyan; text-style: bold; margin-bottom: 1; }
     .setup-help { color: #a8c7d8; margin-bottom: 1; }
+    Input, Select { width: 1fr; color: white; background: #111923; border: round #245c7a; }
+    Input:focus, Select:focus { background: #162430; border: round #2ee6a6; }
     .hidden { display: none; }
     """
 
