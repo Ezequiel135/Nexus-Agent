@@ -93,6 +93,7 @@ Se quiser forçar um navegador específico, defina `NEXUS_BROWSER=chrome`, `chro
 - Dá para ter várias contas com chaves de API diferentes e alternar entre elas com `nexus login` e `nexus logout`
 - Dá para ter vários agentes nomeados, cada um preso a uma conta, com instruções extras próprias
 - O setup aceita `Outro / Custom` para providers com `Nome/ID do provider`, `Base URL / Endpoint` e `API Key` em campos separados
+- O setup agora mostra um aviso acima de cada caixa dizendo exatamente onde colocar `Nome do provider`, `Base URL` e `API Key`
 
 ### 📓 Notebooks Jupyter
 - Criação e leitura de notebooks `.ipynb` direto pelo CLI
@@ -308,8 +309,8 @@ Na primeira execução, o Nexus entra em **modo setup** e pede:
 3. **Provider** — OpenAI, Anthropic, Google, Ollama, Groq ou `Outro / Custom`
 4. **API Key** — sua chave do provedor
 5. **Model Name** — ex: `gpt-4o-mini`, `claude-3-5-sonnet`, `llama3`
-6. **Nome/ID do provider custom** — quando escolher `Outro / Custom`
-7. **Base URL / Endpoint** — campo separado da API Key para providers customizados
+6. **Nome/ID do provider custom** — quando escolher `Outro / Custom`, em caixa própria
+7. **Base URL / Endpoint** — em caixa própria, separada da API Key
 8. **Nome do agente inicial** — primeiro agente da conta
 9. **Instrução extra do agente** — opcional
 10. **Senha Mestra** — protege o modo autônomo

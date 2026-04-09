@@ -116,6 +116,11 @@ class SetupApp(App[SetupPayload | None]):
             provider_options.append((label, provider))
         yield Container(
             Static("NEXUS AGENT SETUP OBRIGATORIO", classes="setup-title"),
+            Static(
+                "Preencha cada caixa com um tipo de dado separado. "
+                "Nao misture API Key com URL.",
+                classes="setup-help",
+            ),
             Static("Tipo de UI"),
             Select(
                 [
@@ -136,25 +141,35 @@ class SetupApp(App[SetupPayload | None]):
                 classes="field",
             ),
             Container(
-                Static("Credenciais da conta", classes="setup-section-title"),
-                Static("A API Key fica em uma caixa separada da URL do provider.", classes="setup-help"),
-                Static("API Key"),
-                Input(password=True, id="api_key", classes="field"),
-                id="api-key-wrap",
-                classes="setup-section",
-            ),
-            Container(
                 Static("Provider custom / Outro", classes="setup-section-title"),
                 Static(
-                    "Preencha em caixas separadas: nome do provider e Base URL / Endpoint. "
-                    "Nao junte URL com API Key.",
+                    "Se escolheu Outro / Custom, preencha os campos abaixo separadamente.",
                     classes="setup-help",
                 ),
                 Static("Nome/ID do provider custom"),
+                Static(
+                    "Coloque aqui somente o nome/ID do provider. Ex: openrouter, azure, provider-interno.",
+                    classes="setup-help",
+                ),
                 Input(placeholder="openai / openrouter / provider interno", id="custom_provider", classes="field"),
                 Static("Base URL / Endpoint"),
+                Static(
+                    "Coloque aqui somente a URL base/endpoint. Ex: https://api.exemplo.com/v1",
+                    classes="setup-help",
+                ),
                 Input(placeholder="https://api.exemplo.com/v1", id="base_url", classes="field"),
                 id="custom-provider-wrap",
+                classes="setup-section",
+            ),
+            Container(
+                Static("Credenciais da conta", classes="setup-section-title"),
+                Static("API Key"),
+                Static(
+                    "Coloque aqui somente a API Key da conta. Nao coloque URL neste campo.",
+                    classes="setup-help",
+                ),
+                Input(password=True, id="api_key", classes="field"),
+                id="api-key-wrap",
                 classes="setup-section",
             ),
             Static("Model Name"),
@@ -195,6 +210,9 @@ class SetupApp(App[SetupPayload | None]):
         password = self.query_one("#password", Input).value.strip()
         if not api_key or not model_name or not password:
             self.notify("Preencha conta, provider, API key, model, agente e senha.")
+            return
+        if normalize_provider(str(provider)) == "Custom" and not custom_provider:
+            self.notify("Provider custom exige Nome/ID do provider.")
             return
         if normalize_provider(str(provider)) == "Custom" and not base_url:
             self.notify("Provider custom exige Base URL / Endpoint.")
