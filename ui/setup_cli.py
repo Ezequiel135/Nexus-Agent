@@ -4,6 +4,11 @@ import getpass
 import os
 import sys
 
+# --- GAMBIARRA TÉCNICA NECESSÁRIA PARA RECONHECER A PASTA CORE ---
+# Adiciona a pasta raiz ao sistema para que o import de 'core' funcione
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+# ----------------------------------------------------------------
+
 from rich.console import Console
 from rich.panel import Panel
 
