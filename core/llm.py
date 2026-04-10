@@ -6,6 +6,7 @@ from typing import Any
 
 from .actions import AcoesAgente
 from .config import NexusConfig
+from .logging_utils import log_event
 from .memory import memory_summary
 from .state import ActivityMonitor
 
@@ -28,6 +29,22 @@ PLANNER_PROMPT = (
     '{"plan": [{"step": 1, "task": "descricao da tarefa", "tool": "nome da ferramenta", "args": {...}}]}\n'
     "Use apenas as ferramentas disponiveis. Se nao precisar de ferramenta, use \"tool\": null.\n"
     "Se o objetivo for simples, pode retornar apenas uma tarefa."
+)
+
+LLM_MAX_RETRY_ATTEMPTS = 10
+LLM_RETRY_DELAY_STEP_SECONDS = 10
+LLM_RETRY_ERROR_MARKERS = (
+    "429",
+    "quota",
+    "insufficient_quota",
+    "rate limit",
+    "rate_limit",
+    "too many requests",
+    "resource exhausted",
+    "resource_exhausted",
+    "retry after",
+    "requests per min",
+    "tokens per min",
 )
 
 
@@ -54,6 +71,73 @@ def planner_prompt(config: NexusConfig) -> str:
     return f"{PLANNER_PROMPT} {extra}".strip() if extra else PLANNER_PROMPT
 
 
+def retry_delay_seconds(attempt_number: int) -> int:
+    return max(1, attempt_number) * LLM_RETRY_DELAY_STEP_SECONDS
+
+
+def is_retryable_llm_error(exc: Exception) -> bool:
+    details = [type(exc).__name__, str(exc)]
+    status_code = getattr(exc, "status_code", None)
+    if status_code is not None:
+        details.append(str(status_code))
+    response = getattr(exc, "response", None)
+    if response is not None:
+        response_status = getattr(response, "status_code", None)
+        if response_status is not None:
+            details.append(str(response_status))
+    haystack = " ".join(part for part in details if part).lower()
+    return any(marker in haystack for marker in LLM_RETRY_ERROR_MARKERS)
+
+
+def completion_with_retries(
+    config: NexusConfig,
+    monitor: ActivityMonitor,
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]] | None = None,
+) -> Any:
+    try:
+        from litellm import completion
+    except ImportError as exc:
+        raise RuntimeError("LiteLLM nao esta instalado no ambiente atual.") from exc
+
+    request_kwargs: dict[str, Any] = {
+        "model": config.model_name,
+        "messages": messages,
+        **config.completion_kwargs(),
+    }
+    if tools is not None:
+        request_kwargs["tools"] = tools
+
+    last_exc: Exception | None = None
+    for attempt in range(1, LLM_MAX_RETRY_ATTEMPTS + 1):
+        started = time.perf_counter()
+        try:
+            response = completion(**request_kwargs)
+            latency_ms = int((time.perf_counter() - started) * 1000)
+            monitor.set_latency(latency_ms)
+            return response
+        except Exception as exc:
+            latency_ms = int((time.perf_counter() - started) * 1000)
+            monitor.set_latency(latency_ms)
+            last_exc = exc
+            if not is_retryable_llm_error(exc):
+                raise
+            if attempt >= LLM_MAX_RETRY_ATTEMPTS:
+                break
+            wait_seconds = retry_delay_seconds(attempt)
+            detail = (
+                f"Erro de cota/rate limit na API ({attempt}/{LLM_MAX_RETRY_ATTEMPTS}). "
+                f"Nova tentativa em {wait_seconds}s."
+            )
+            monitor.set_state("thinking", detail)
+            log_event("LLM_RETRY", detail, status="WARN")
+            time.sleep(wait_seconds)
+
+    raise RuntimeError(
+        f"Falha apos {LLM_MAX_RETRY_ATTEMPTS} tentativas por erro de cota/rate limit: {last_exc}"
+    ) from last_exc
+
+
 class PlannerExecutor:
     def __init__(
         self,
@@ -71,16 +155,7 @@ class PlannerExecutor:
         self.monitor.set_model(config.model_name)
 
     def _completion(self, messages: list[dict[str, Any]]) -> Any:
-        try:
-            from litellm import completion
-        except ImportError as exc:
-            raise RuntimeError("LiteLLM nao esta instalado no ambiente atual.") from exc
-
-        started = time.perf_counter()
-        response = completion(model=self.config.model_name, messages=messages, **self.config.completion_kwargs())
-        latency_ms = int((time.perf_counter() - started) * 1000)
-        self.monitor.set_latency(latency_ms)
-        return response
+        return completion_with_retries(self.config, self.monitor, messages)
 
     @staticmethod
     def _message_content(message: Any) -> str:
@@ -179,21 +254,7 @@ class LiteLLMBridge:
         self.monitor.set_model(config.model_name)
 
     def _completion(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None) -> Any:
-        try:
-            from litellm import completion
-        except ImportError as exc:
-            raise RuntimeError("LiteLLM nao esta instalado no ambiente atual.") from exc
-
-        started = time.perf_counter()
-        response = completion(
-            model=self.config.model_name,
-            messages=messages,
-            tools=tools,
-            **self.config.completion_kwargs(),
-        )
-        latency_ms = int((time.perf_counter() - started) * 1000)
-        self.monitor.set_latency(latency_ms)
-        return response
+        return completion_with_retries(self.config, self.monitor, messages, tools=tools)
 
     @staticmethod
     def _message_content(message: Any) -> str:

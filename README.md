@@ -37,6 +37,7 @@ Inspirado no fluxo de trabalho do Codex e Claude Code — mas com cérebro de ve
 - [Troubleshooting](#troubleshooting)
 - [Roadmap](#roadmap)
 - [Sistema de Versionamento](#sistema-de-versionamento-calver)
+- [Changelog](#changelog)
 - [Contribuindo](#contribuindo)
 - [Licença](#licença)
 
@@ -58,6 +59,7 @@ Diferente de assistentes que só respondem, o Nexus **planeja, age e reporta**. 
 - **Escala:** múltiplas contas, múltiplos agentes e execução paralela.
 - **Segurança:** comandos avaliados por Luz Verde antes da execução.
 - **Versão atual:** `26.1.2`, com versionamento CalVer.
+- **Histórico de mudanças:** veja `CHANGELOG.md` para correções e melhorias recentes.
 
 ### Quick Start
 
@@ -112,6 +114,11 @@ Instalador multiplataforma que funciona de primeira:
 - Cores no terminal, barra de progresso
 - PATH auto-configurado em `~/.bashrc` e `~/.zshrc`
 - Suporte a instalação global (`NEXUS_INSTALL_GLOBAL=1`)
+
+### 🔁 Retry Automático de API
+- Quando a API responde com erro de cota/rate limit, o Nexus tenta novamente até **10 vezes**
+- O backoff é progressivo: **10s, 20s, 30s...**
+- Erros de chave inválida ou modelo inválido continuam falhando imediatamente, sem retry cego
 
 ### 🌐 Browser Explícito
 As ações de navegador não usam mais o navegador padrão nem Brave. O agente abre URLs apenas em browsers suportados detectados explicitamente: `Chrome`, `Chromium`, `Firefox` ou `Edge`.
@@ -183,6 +190,10 @@ A versão `26.1.2` mantém **Notebook integration (Jupyter)**, **automação rem
 - Modo remoto com trava global `arm/disarm`
 - Allowlist de remetentes autorizados e prefixo obrigatório por integração
 - Execução paralela de vários agentes via `nexus parallel run`
+
+## Changelog
+
+O histórico consolidado de correções, melhorias e mudanças notáveis agora fica em `CHANGELOG.md`.
 
 ### Comandos de Notebook
 
@@ -740,6 +751,11 @@ Se continuar apontando para um launcher antigo em `/usr/local/bin/nexus`, remova
 ```bash
 nexus setup  # reconfigure
 ```
+
+**Comportamento atual:**
+- Se o problema for **cota/rate limit**, o Nexus faz até **10 tentativas**
+- O tempo de espera cresce em **10s, 20s, 30s...**
+- Se o problema for **chave inválida** ou **modelo incorreto**, a falha volta imediatamente para você corrigir
 
 ### 4. Interface não abre (textual não instalado)
 
