@@ -528,8 +528,8 @@ class MissionPanel(Static):
 
 class GreenLightBar(Static):
     """Visual indicator of safety status."""
-    def __init__(self):
-        super().__init__()
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self.status = "🟢 LUZ VERDE — ambiente seguro"
         self.can_focus = False
 
@@ -549,9 +549,9 @@ class NexusApp(App[None]):
     #log-panel { width: 40; border: round #24c8ff; padding: 0 1; background: #08111a; }
     #chat-log, #action-log { height: 1fr; }
     #prompt { dock: bottom; margin-top: 1; }
-    .panel-title { color: bright_cyan; text-style: bold; }
+    .panel-title { color: #24c8ff; text-style: bold; }
     .hint-box { color: white; background: #0b1722; border: round #245c7a; padding: 0 1; margin-bottom: 1; }
-    #mission-panel { height: auto; border: round bright_magenta; margin-bottom: 1; padding: 1; background: #12081a; }
+    #mission-panel { height: auto; border: round #ff4fd8; margin-bottom: 1; padding: 1; background: #12081a; }
     #light-bar { text-style: bold; dock: top; height: 1; content-align: center middle; background: #0a2a0a; }
     """
 
