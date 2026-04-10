@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+import os
+import sys
+
+PROJECT_ROOT = os.path.abspath(os.path.dirname(__file__))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
 import argparse
 import getpass
 import json
-import shutil
-import os
 import platform
+import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 from core.actions import AcoesAgente

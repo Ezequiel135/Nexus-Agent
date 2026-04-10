@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+import os
+import sys
+
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
 import getpass
 import json
-import os
 import threading
 from dataclasses import dataclass
 
@@ -111,10 +117,13 @@ class SetupApp(App[SetupPayload | None]):
     #setup-card {
         width: 1fr;
         max-width: 112;
+        height: auto;
         margin: 1 2 2 2;
         padding: 0 0 2 0;
     }
     #setup-hero {
+        layout: vertical;
+        height: auto;
         border: round #28bff0;
         background: #081621;
         padding: 1 2;
@@ -158,6 +167,8 @@ class SetupApp(App[SetupPayload | None]):
         margin-top: 1;
     }
     .setup-section {
+        layout: vertical;
+        height: auto;
         border: round #235e7e;
         background: #091521;
         padding: 1 2;
@@ -200,6 +211,8 @@ class SetupApp(App[SetupPayload | None]):
         color: #7f9fb4;
     }
     #custom-provider-wrap {
+        layout: vertical;
+        height: auto;
         margin-top: 1;
     }
     #setup-actions {
@@ -236,8 +249,8 @@ class SetupApp(App[SetupPayload | None]):
 
     def compose(self) -> ComposeResult:
         with VerticalScroll(id="setup-shell"):
-            with Container(id="setup-card"):
-                with Container(id="setup-hero"):
+            with Vertical(id="setup-card"):
+                with Vertical(id="setup-hero"):
                     yield Static(f"NEXUS AGENT {APP_VERSION}", classes="setup-brand")
                     yield Static("Configuracao Inicial", classes="setup-title")
                     yield Static(
@@ -251,7 +264,7 @@ class SetupApp(App[SetupPayload | None]):
                     )
                     yield Static("", id="setup-live-status")
 
-                with Container(classes="setup-section"):
+                with Vertical(classes="setup-section"):
                     yield Static("Ambiente", classes="setup-section-title")
                     yield Static(
                         "Defina como o Nexus vai abrir e identifique a conta principal desta instalacao.",
@@ -264,7 +277,7 @@ class SetupApp(App[SetupPayload | None]):
                     yield Static("Exemplo: Conta principal, Trabalho, Cliente X.", classes="setup-hint")
                     yield Input(value="Conta principal", id="account_name", classes="field")
 
-                with Container(classes="setup-section"):
+                with Vertical(classes="setup-section"):
                     yield Static("Provider e Acesso", classes="setup-section-title")
                     yield Static(
                         "Preencha cada caixa com um tipo de dado separado. "
@@ -282,7 +295,7 @@ class SetupApp(App[SetupPayload | None]):
                         id="provider",
                         classes="field",
                     )
-                    with Container(id="custom-provider-wrap", classes="setup-section"):
+                    with Vertical(id="custom-provider-wrap", classes="setup-section"):
                         yield Static("Provider custom", classes="setup-section-title")
                         yield Static("Obrigatorio apenas quando o provider for Outro / Custom.", classes="setup-section-help")
                         yield Static("Nome/ID do provider custom", classes="setup-label")
@@ -309,7 +322,7 @@ class SetupApp(App[SetupPayload | None]):
                         classes="field",
                     )
 
-                with Container(classes="setup-section"):
+                with Vertical(classes="setup-section"):
                     yield Static("Perfil do Agente", classes="setup-section-title")
                     yield Static(
                         "O agente pode ter um nome proprio e uma instrucao extra para orientar o comportamento.",
@@ -326,7 +339,7 @@ class SetupApp(App[SetupPayload | None]):
                         classes="field",
                     )
 
-                with Container(classes="setup-section"):
+                with Vertical(classes="setup-section"):
                     yield Static("Seguranca", classes="setup-section-title")
                     yield Static(
                         "Essa senha protege o modo autonomo do Nexus e sera exigida em operacoes sensiveis.",
@@ -389,7 +402,7 @@ class SetupApp(App[SetupPayload | None]):
 
     def _toggle_custom_provider_fields(self) -> None:
         provider = self.query_one("#provider", Input).value or "OpenAI"
-        self.query_one("#custom-provider-wrap", Container).display = normalize_provider(provider) == "Custom"
+        self.query_one("#custom-provider-wrap").display = normalize_provider(provider) == "Custom"
 
     def _set_feedback(self, message: str, level: str = "info") -> None:
         feedback = self.query_one("#setup-feedback", Static)

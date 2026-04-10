@@ -3,7 +3,7 @@ from __future__ import annotations
 from unittest import IsolatedAsyncioTestCase
 from unittest.mock import patch
 
-from textual.containers import Container
+from textual.containers import Vertical
 from textual.widgets import Input
 
 from ui.app import SetupApp
@@ -22,7 +22,7 @@ class SetupUiTests(IsolatedAsyncioTestCase):
             provider.value = "Custom"
             await pilot.pause()
 
-            custom_wrap = app.query_one("#custom-provider-wrap", Container)
+            custom_wrap = app.query_one("#custom-provider-wrap", Vertical)
             self.assertTrue(custom_wrap.display)
 
     async def test_setup_submit_returns_payload(self) -> None:
@@ -42,3 +42,18 @@ class SetupUiTests(IsolatedAsyncioTestCase):
         self.assertEqual(app.return_value.ui_mode, "visual")
         self.assertEqual(app.return_value.provider, "OpenAI")
         self.assertEqual(app.return_value.model_name, "gpt-4o-mini")
+
+    async def test_setup_screenshot_contains_primary_labels(self) -> None:
+        app = SetupApp()
+
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            svg = app.export_screenshot(title="SetupApp").replace("&#160;", " ")
+
+        self.assertIn("Configuracao Inicial", svg)
+        self.assertIn("Setup simplificado", svg)
+        self.assertIn("Ambiente", svg)
+        self.assertIn("Interface inicial", svg)
+        self.assertIn("Conta principal", svg)
+        self.assertIn("OpenAI", svg)
+        self.assertIn("Nome da conta", svg)

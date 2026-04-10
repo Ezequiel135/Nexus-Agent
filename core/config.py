@@ -200,7 +200,7 @@ class NexusConfig:
 
 
 class NexusPaths:
-    base_dir = Path.home() / ".nexus"
+    base_dir = Path(os.environ["NEXUS_HOME"]).expanduser() if os.environ.get("NEXUS_HOME") else Path.home() / ".nexus"
     config_path = base_dir / "config.json"
     log_path = base_dir / "nexus.log"
     trash_dir = base_dir / "trash"

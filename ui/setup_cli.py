@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-import getpass
 import os
 import sys
 
-# --- GAMBIARRA TÉCNICA NECESSÁRIA PARA RECONHECER A PASTA CORE ---
-# Adiciona a pasta raiz ao sistema para que o import de 'core' funcione
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-# ----------------------------------------------------------------
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+import getpass
 
 from rich.console import Console
 from rich.panel import Panel
@@ -201,3 +201,12 @@ def validate_account_inputs(provider: str, api_key: str, model_name: str, base_u
         raise SystemExit("Setup cancelado: API key e model sao obrigatorios.")
     if normalize_provider(provider) == "Custom" and not base_url.strip():
         raise SystemExit("Setup cancelado: provider custom exige Base URL / Endpoint.")
+
+
+def main() -> int:
+    run_plain_setup()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

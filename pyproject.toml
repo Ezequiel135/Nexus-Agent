@@ -1,15 +1,40 @@
 [build-system]
-requires = ["setuptools>=61"]
+requires = ["setuptools>=69"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "pc-remote-agent"
+name = "nexus-agent"
 version = "26.1.2"
-description = "Cross-platform desktop bridge CLI for AI agents with safety indicator and resilient vision"
+description = "Nexus Agent local autonomy CLI with visual/plain interfaces and desktop bridge services"
+readme = "README.md"
 requires-python = ">=3.10"
-dependencies = [
-  "mss",
-  "pyautogui",
-  "Pillow",
-  "pytesseract",
+authors = [
+  { name = "Ezequiel 135" },
 ]
+license = { text = "MIT" }
+keywords = ["ai-agent", "automation", "cli", "desktop", "nexus"]
+dependencies = [
+  "ipykernel",
+  "litellm==1.72.6",
+  "mss",
+  "nbclient",
+  "nbformat",
+  "Pillow",
+  "psutil",
+  "pyautogui",
+  "python-dotenv",
+  "pytesseract",
+  "requests",
+  "rich",
+  "textual",
+]
+
+[project.scripts]
+nexus = "main:main"
+pc-remote-agent = "pc_remote_agent.cli:main"
+
+[tool.setuptools]
+py-modules = ["main"]
+
+[tool.setuptools.packages.find]
+include = ["core", "core.*", "pc_remote_agent", "pc_remote_agent.*", "ui", "ui.*"]
