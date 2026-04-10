@@ -23,11 +23,50 @@ from core.state import ActivityMonitor
 from core.version import APP_VERSION
 
 
+def format_session_summary(config) -> str:
+    account = config.active_account
+    agent = config.active_agent
+    provider = account.provider_label if account else "-"
+    model_name = account.model_name if account else "-"
+    account_name = account.name if account else "-"
+    agent_name = agent.name if agent else "-"
+    return (
+        f"Conta ativa: {account_name}\n"
+        f"Agente ativo: {agent_name}\n"
+        f"Provider: {provider}\n"
+        f"Modelo: {model_name}\n"
+        f"Workspace Nexus: {NexusPaths.base_dir}"
+    )
+
+
+def format_onboarding_message(first_run: bool = False) -> str:
+    intro = (
+        "Primeira sessao concluida. O setup ja foi salvo e o agente esta pronto para operar."
+        if first_run
+        else "Bem-vindo ao NEXUS AGENT."
+    )
+    return (
+        f"{intro}\n\n"
+        "1. Descreva um objetivo real em linguagem natural.\n"
+        "2. Use /help para comandos e /tools para ver capacidades.\n"
+        "3. Use /blocked para revisar os limites de seguranca.\n"
+        "4. Use /memory para consultar o contexto salvo.\n"
+        "5. Use nexus parallel run para comparar varios agentes."
+    )
+
+
 class PlainNexusCLI:
-    def __init__(self, bridge: LiteLLMBridge, monitor: ActivityMonitor, initial_task: str | None = None) -> None:
+    def __init__(
+        self,
+        bridge: LiteLLMBridge,
+        monitor: ActivityMonitor,
+        initial_task: str | None = None,
+        first_run: bool = False,
+    ) -> None:
         self.bridge = bridge
         self.monitor = monitor
         self.initial_task = initial_task
+        self.first_run = first_run
         self.console = Console()
         self.conversation: list[dict[str, str]] = []
         self.bridge.actions.set_event_callback(self._write_log)
@@ -36,6 +75,9 @@ class PlainNexusCLI:
         self.conversation = self._load_history()
         ok, message = self.bridge.handshake()
         self._render_header()
+        self._render_session_summary()
+        if self.first_run:
+            self._render_onboarding_panel(first_run=True)
         self._write_log(message)
         self.console.print("[bold green]NEXUS AGENT online[/bold green]" if ok else f"[bold red]{message}[/bold red]")
         if self.initial_task:
@@ -72,6 +114,25 @@ class PlainNexusCLI:
         )
         self.console.print(
             "[dim]Dica: use /help, /accounts, /agents, /mcp, /notebooks, /remote, /tools e /exit[/dim]"
+        )
+
+    def _render_session_summary(self) -> None:
+        self.console.print(
+            Panel.fit(
+                format_session_summary(self.bridge.config),
+                title="Sessao Ativa",
+                border_style="bright_blue",
+            )
+        )
+
+    def _render_onboarding_panel(self, *, first_run: bool = False) -> None:
+        title = "Primeira Sessao" if first_run else "Onboarding"
+        self.console.print(
+            Panel.fit(
+                format_onboarding_message(first_run=first_run),
+                title=title,
+                border_style="bright_magenta",
+            )
         )
 
     def _handle_prompt(self, prompt: str) -> None:
@@ -207,20 +268,7 @@ class PlainNexusCLI:
                 self.console.print(table)
             return False
         if command in {"/init", "/onboarding"}:
-            self.console.print(
-                Panel.fit(
-                    "Bem-vindo ao NEXUS AGENT.\n\n"
-                    "1. Descreva um objetivo natural.\n"
-                    "2. O agente decide quando usar shell, arquivos, mouse, teclado e memoria.\n"
-                    "3. Use /tools para ver capacidades.\n"
-                    "4. Use /memory para ver memoria local.\n"
-                    "5. Use /blocked para ver o que nunca sera executado.\n"
-                    "6. Use nexus parallel run para coordenar varios agentes.\n"
-                    "7. Use nexus uninstall para remover a instalacao local.",
-                    title="Onboarding",
-                    border_style="bright_cyan",
-                )
-            )
+            self._render_onboarding_panel()
             return False
         if command == "/blocked":
             self.console.print("[bold red]Comandos bloqueados por seguranca[/bold red]")

@@ -73,6 +73,29 @@ def build_runtime(config, monitor) -> LiteLLMBridge:
     return LiteLLMBridge(config, monitor, AcoesAgente(config))
 
 
+def build_onboarding_task(first_run: bool = False) -> str:
+    if first_run:
+        return (
+            "Entre em modo onboarding de primeira execucao. Confirme que o setup foi concluido, "
+            "explique como operar o NEXUS AGENT com seguranca, mostre exemplos curtos de objetivos reais "
+            "e destaque /help, /tools, /memory, /blocked, agentes paralelos, notebooks e bots remotos. "
+            "Seja direto, profissional e operacional."
+        )
+    return (
+        "Entre em modo onboarding. Apresente o NEXUS AGENT, explique comandos principais, "
+        "como salvar memoria local, como usar agentes em paralelo, como ver comandos bloqueados "
+        "e como operar no modo terminal."
+    )
+
+
+def resolve_initial_task(task: str | None, *, fresh_setup: bool) -> str | None:
+    if task:
+        return task
+    if fresh_setup:
+        return build_onboarding_task(first_run=True)
+    return None
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="nexus", description="NEXUS AGENT local autonomy protocol")
     parser.add_argument("--version", action="version", version=f"%(prog)s {APP_VERSION}")
@@ -81,10 +104,12 @@ def build_parser() -> argparse.ArgumentParser:
     start = sub.add_parser("start", help="Inicia o NEXUS AGENT")
     start.add_argument("--task", help="Executa uma tarefa inicial ao abrir a interface")
     start.add_argument("--plain", action="store_true", help="Usa modo terminal puro, estilo REPL")
+    start.add_argument("--onboarding", action="store_true", help="Abre a sessao com um guia inicial de uso")
 
     sub.add_parser("blocked", help="Mostra os comandos e areas bloqueadas por seguranca")
     sub.add_parser("doctor", help="Mostra diagnostico do terminal e da plataforma")
-    sub.add_parser("onboarding", help="Abre a tela de boas-vindas e onboarding")
+    onboarding = sub.add_parser("onboarding", help="Abre a tela de boas-vindas e onboarding")
+    onboarding.add_argument("--plain", action="store_true", help="Usa modo terminal puro para o onboarding")
     sub.add_parser("setup", help="Forca o modo de configuracao inicial")
     sub.add_parser("accounts", help="Lista as contas configuradas")
     login = sub.add_parser("login", help="Troca para uma conta existente ou adiciona uma nova")
@@ -622,15 +647,17 @@ def handle_remote(args) -> int:
     return 0
 
 
-def ensure_config(force_setup: bool = False) -> None:
-    if force_setup or not config_exists():
+def ensure_config(force_setup: bool = False) -> bool:
+    had_config = config_exists()
+    if force_setup or not had_config:
         _, SetupApp = import_ui_components(required=False)
         if SetupApp is not None and sys.stdin.isatty() and sys.stdout.isatty():
             SetupApp().run()
-            return
-        from ui.setup_cli import run_plain_setup
+        else:
+            from ui.setup_cli import run_plain_setup
 
-        run_plain_setup()
+            run_plain_setup()
+    return not had_config and config_exists()
 
 
 def should_use_plain_mode(force_plain: bool, config=None) -> bool:
@@ -656,7 +683,7 @@ def should_use_plain_mode(force_plain: bool, config=None) -> bool:
 
 
 def handle_start(task: str | None, plain: bool = False) -> int:
-    ensure_config()
+    fresh_setup = ensure_config()
     if not config_exists():
         print("Configuracao inicial nao concluida. Rode nexus setup e finalize o formulario.")
         return 1
@@ -664,6 +691,7 @@ def handle_start(task: str | None, plain: bool = False) -> int:
     if config.active_account is None:
         print("Nenhuma conta ativa. Rode nexus login para entrar em uma conta ou nexus setup para reconfigurar.")
         return 1
+    initial_task = resolve_initial_task(task, fresh_setup=fresh_setup)
     use_plain_mode = should_use_plain_mode(plain, config)
     monitor = ActivityMonitor()
     monitor.start()
@@ -684,21 +712,17 @@ def handle_start(task: str | None, plain: bool = False) -> int:
         if use_plain_mode:
             from ui.plain_cli import PlainNexusCLI
 
-            PlainNexusCLI(bridge, monitor, initial_task=task).run()
+            PlainNexusCLI(bridge, monitor, initial_task=initial_task, first_run=fresh_setup).run()
         else:
             NexusApp, _ = import_ui_components(required=True)
-            NexusApp(bridge, monitor, initial_task=task).run()
+            NexusApp(bridge, monitor, initial_task=initial_task).run()
         return 0
     finally:
         monitor.stop()
 
 
 def handle_onboarding(plain: bool = False) -> int:
-    welcome_task = (
-        "Entre em modo onboarding. Apresente o NEXUS AGENT, explique comandos principais, "
-        "como salvar memoria local, como usar agentes em paralelo, como ver comandos bloqueados e como operar no modo terminal."
-    )
-    return handle_start(welcome_task, plain=plain)
+    return handle_start(build_onboarding_task(first_run=False), plain=plain)
 
 
 def handle_update() -> int:
@@ -764,13 +788,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "doctor":
         return handle_doctor()
     if args.command == "onboarding":
-        return handle_onboarding(plain=True)
+        return handle_onboarding(plain=args.plain)
     if args.command == "update":
         return handle_update()
     if args.command == "uninstall":
         return handle_uninstall()
     if args.command == "start":
-        return handle_start(args.task, plain=args.plain)
+        requested_task = build_onboarding_task(first_run=False) if args.onboarding else args.task
+        return handle_start(requested_task, plain=args.plain)
     return 0
 
 
