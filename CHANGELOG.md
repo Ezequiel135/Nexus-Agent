@@ -26,6 +26,17 @@ O formato segue a ideia de:
 - Corrigido o CSS inválido da `NexusApp` que causava falha no parser do Textual.
 - Corrigido o mount da `NexusApp` ao aceitar `id=` em `GreenLightBar`.
 
+## [26.3.1] - 2026-04-11
+
+### Added
+- Formatação de transcript estilo agente de terminal para logs e passos de execução.
+- Banner `Worked for ...`, linhas `• Ran ...` e bloco `↳ Interacted with background terminal` em fluxos compatíveis.
+- Testes para o formatador de transcript e o novo estilo de interação.
+
+### Changed
+- A UI visual e o modo plain agora narram melhor o progresso, os comandos executados e o fechamento de cada tarefa.
+- O prompt do agente ficou mais curto e operacional, mais próximo de Codex/Claude Code.
+
 ## [26.3.0] - 2026-04-11
 
 ### Added

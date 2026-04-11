@@ -9,6 +9,7 @@ if PROJECT_ROOT not in sys.path:
 
 import json
 import threading
+import time
 
 from rich.console import Console
 from rich.panel import Panel
@@ -23,6 +24,7 @@ from core.memory import clear_memory, memory_summary, remember
 from core.notebooks import list_notebooks
 from core.safeguards import blocked_examples, blocked_reasons
 from core.state import ActivityMonitor
+from core.transcript import background_interaction, bullet, format_activity_log, worked_banner
 from core.version import APP_VERSION
 
 
@@ -75,6 +77,7 @@ class PlainNexusCLI:
         self.conversation: list[dict[str, str]] = []
         self.pending_plan: dict[str, object] | None = None
         self.cancel_event = threading.Event()
+        self.task_started_at: float | None = None
         self.bridge.actions.set_event_callback(self._write_log)
         self.bridge.actions.set_cancel_event(self.cancel_event)
 
@@ -148,15 +151,19 @@ class PlainNexusCLI:
         remember(prompt, source="user", kind="prompt")
         try:
             if self._should_preview_plan(prompt):
+                self._start_task_log("Vou montar um plano antes de executar e mostrar cada passo.")
                 self.pending_plan = self.bridge.preview_plan(prompt)
                 self._render_plan_preview(self.pending_plan)
                 return
+            self._start_task_log("Vou executar essa tarefa e mostrar os passos conforme avancar.")
             self._run_chat(prompt)
         except CancelledExecution as exc:
             self.console.print(Panel.fit(str(exc), title="CANCELADO", border_style="yellow"))
+            self._finish_task_log("Execucao cancelada.")
         except Exception as exc:
             self.monitor.set_state("error", str(exc))
             self.console.print(Panel.fit(str(exc), title="ERRO", border_style="red"))
+            self._finish_task_log("Execucao terminou com erro.")
 
     def _should_preview_plan(self, prompt: str) -> bool:
         return should_preview_plan(self.bridge.config, prompt)
@@ -174,6 +181,7 @@ class PlainNexusCLI:
         lines.append("")
         lines.append("Use /approve para executar ou /cancel para descartar.")
         self.console.print(Panel.fit("\n".join(lines), title="Plano", border_style="bright_magenta"))
+        self._finish_task_log("Plano pronto. Aguardando /approve.")
 
     def _run_chat(self, prompt: str) -> None:
         self.cancel_event.clear()
@@ -183,6 +191,7 @@ class PlainNexusCLI:
         self.conversation.append({"role": "assistant", "content": answer})
         self._save_history()
         self.console.print(Panel.fit(answer or "(sem resposta)", title="NEXUS AGENT", border_style="green"))
+        self._finish_task_log("Execucao direta concluida.")
 
     def _approve_pending_plan(self) -> None:
         if self.pending_plan is None:
@@ -193,8 +202,10 @@ class PlainNexusCLI:
         self.cancel_event.clear()
         goal = str(preview.get("goal", ""))
         steps = preview.get("steps", [])
+        self._start_task_log("Plano aprovado. Vou executar os passos agora.")
         result = self.bridge.execute_plan(goal, steps if isinstance(steps, list) else [])
         self.console.print(Panel.fit(result.get("summary", "(sem resumo)"), title="Execucao", border_style="green"))
+        self._finish_task_log("Plano concluido.")
 
     def _handle_slash(self, prompt: str) -> bool:
         command = prompt.strip().lower()
@@ -424,7 +435,23 @@ class PlainNexusCLI:
         return False
 
     def _write_log(self, text: str) -> None:
-        self.console.print(f"[dim][LOG][/dim] {text}")
+        rendered = format_activity_log(text)
+        if rendered:
+            self.console.print(rendered)
+
+    def _start_task_log(self, message: str) -> None:
+        self.task_started_at = time.monotonic()
+        self.console.print(bullet(message))
+
+    def _finish_task_log(self, message: str) -> None:
+        started_at = self.task_started_at
+        self.task_started_at = None
+        if started_at is None:
+            return
+        self.console.print("")
+        self.console.print(worked_banner(time.monotonic() - started_at))
+        self.console.print("")
+        self.console.print(bullet(message))
 
     def _handle_sudo_command(self, command: str) -> bool:
         parts = command.split()
@@ -447,6 +474,7 @@ class PlainNexusCLI:
             return False
         timeout_spec = parts[2] if len(parts) >= 3 else None
         scope = parts[3] if len(parts) >= 4 else None
+        self.console.print(background_interaction("sudo prompt aberto para senha manual"))
         self.console.print("[cyan]Aprovacao sudo: digite a senha manualmente no prompt nativo do sudo.[/cyan]")
         ok, message = self.bridge.actions.enable_sudo_session(timeout_spec, scope)
         color = "green" if ok else "red"
@@ -463,6 +491,7 @@ class PlainNexusCLI:
             self.console.print(f"[yellow]{self.bridge.actions.disable_privilege_session(reason='manual')}[/yellow]")
             return False
         if action == "confirm":
+            self.console.print(background_interaction("root prompt aberto para senha manual"))
             self.console.print("[cyan]Confirmacao root: digite a senha manualmente no prompt nativo do sudo.[/cyan]")
             ok, message = self.bridge.actions.confirm_root_session()
             color = "green" if ok else "red"

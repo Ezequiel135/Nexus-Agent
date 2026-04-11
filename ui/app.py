@@ -10,6 +10,7 @@ if PROJECT_ROOT not in sys.path:
 import getpass
 import json
 import threading
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -39,6 +40,7 @@ from core.logging_utils import log_event
 from core.memory import clear_memory, memory_summary, remember
 from core.state import ActivityMonitor, LIGHT_COLORS, LIGHT_SYMBOLS
 from core.safeguards import blocked_examples, blocked_reasons
+from core.transcript import background_interaction, bullet, format_activity_log, worked_banner
 from core.version import APP_VERSION
 
 
@@ -662,6 +664,7 @@ class NexusApp(App[None]):
         self.launcher_visible = initial_task is None
         self._loading_frame = 0
         self._loading_base = "Carregando modulos, contexto e sessao"
+        self.task_started_at: float | None = None
 
     def compose(self) -> ComposeResult:
         yield GreenLightBar(id="light-bar")
@@ -796,7 +799,23 @@ class NexusApp(App[None]):
         self.query_one("#chat-log", RichLog).write(Markdown(text))
 
     def _write_log(self, text: str) -> None:
-        self.query_one("#action-log", RichLog).write(text)
+        rendered = format_activity_log(text)
+        if rendered:
+            self.query_one("#action-log", RichLog).write(rendered)
+
+    def _start_task_log(self, message: str) -> None:
+        self.task_started_at = time.monotonic()
+        self._write_log(message)
+
+    def _finish_task_log(self, message: str) -> None:
+        started_at = self.task_started_at
+        self.task_started_at = None
+        if started_at is None:
+            return
+        self.query_one("#action-log", RichLog).write("")
+        self.query_one("#action-log", RichLog).write(worked_banner(time.monotonic() - started_at))
+        self.query_one("#action-log", RichLog).write("")
+        self._write_log(message)
 
     def _set_mission_panel(self, text: str) -> None:
         self.query_one("#mission-panel", MissionPanel).set_text(text)
@@ -829,9 +848,11 @@ class NexusApp(App[None]):
             return
         if self._should_preview_plan(prompt):
             self.mission_mode = True
+            self._start_task_log("Vou montar um plano antes de executar e mostrar os passos conforme avancar.")
             self._start_worker(self._process_plan_preview, prompt)
         else:
             self.mission_mode = False
+            self._start_task_log("Vou executar essa tarefa e mostrar os passos conforme avancar.")
             self._start_worker(self._process_simple, prompt)
 
     def _worker_running(self) -> bool:
@@ -878,6 +899,7 @@ class NexusApp(App[None]):
         self.monitor.set_cancellable(False)
         self._set_mission_panel("Execucao/plano cancelado. Nenhuma acao pendente.")
         self._write_log("[WARN] Cancelamento solicitado pelo usuario.")
+        self._finish_task_log("Execucao cancelada.")
 
     def _handle_slash(self, prompt: str) -> None:
         command = prompt.strip().lower()
@@ -1075,6 +1097,7 @@ class NexusApp(App[None]):
             return
         timeout_spec = parts[2] if len(parts) >= 3 else None
         scope = parts[3] if len(parts) >= 4 else None
+        self.query_one("#action-log", RichLog).write(background_interaction("sudo prompt aberto para senha manual"))
         self._write_chat("Digite a senha manualmente no prompt nativo do `sudo`. O Nexus nao salva a senha.")
         ok, message = self._run_with_terminal_release(lambda: self.bridge.actions.enable_sudo_session(timeout_spec, scope))
         self._write_log(message)
@@ -1091,6 +1114,7 @@ class NexusApp(App[None]):
             self._write_log(self.bridge.actions.disable_privilege_session(reason="manual"))
             return
         if action == "confirm":
+            self.query_one("#action-log", RichLog).write(background_interaction("root prompt aberto para senha manual"))
             self._write_chat("Confirmacao root em andamento. Digite a senha manualmente no prompt nativo do `sudo`.")
             ok, message = self._run_with_terminal_release(self.bridge.actions.confirm_root_session)
             self._write_log(message)
@@ -1122,14 +1146,17 @@ class NexusApp(App[None]):
             if not tool_logs:
                 self.call_from_thread(self._write_log, "Nenhuma ferramenta local usada.")
             self.call_from_thread(self._set_mission_panel, "Execucao direta concluida.")
+            self.call_from_thread(self._finish_task_log, "Execucao direta concluida.")
         except CancelledExecution as exc:
             self.call_from_thread(self._write_chat, f"**CANCELADO:** {exc}")
             self.call_from_thread(self._write_log, f"[WARN] {exc}")
             self.call_from_thread(self._set_mission_panel, "Execucao cancelada.")
+            self.call_from_thread(self._finish_task_log, "Execucao cancelada.")
         except Exception as exc:
             self.monitor.set_state("error", str(exc))
             self.call_from_thread(self._write_chat, f"**ERRO:** {exc}")
             self.call_from_thread(self._write_log, f"[ERROR] {exc}")
+            self.call_from_thread(self._finish_task_log, "Execucao terminou com erro.")
         finally:
             self.monitor.set_cancellable(False)
             self.call_from_thread(self._focus_prompt)
@@ -1166,14 +1193,17 @@ class NexusApp(App[None]):
                         self.call_from_thread(self._set_light, assessment)
                         if "VERMELHA" in assessment.upper():
                             break
+            self.call_from_thread(self._finish_task_log, "Plano pronto. Aguardando /approve.")
         except CancelledExecution as exc:
             self.call_from_thread(self._write_chat, f"**CANCELADO:** {exc}")
             self.call_from_thread(self._set_mission_panel, "Preview cancelado.")
+            self.call_from_thread(self._finish_task_log, "Preview cancelado.")
         except Exception as exc:
             self.monitor.set_state("error", str(exc))
             self.call_from_thread(self._set_light, f"ERRO: {exc}")
             self.call_from_thread(self._write_chat, f"**ERRO:** {exc}")
             self.call_from_thread(self._write_log, f"[ERROR] {exc}")
+            self.call_from_thread(self._finish_task_log, "Preview terminou com erro.")
         finally:
             self.monitor.set_cancellable(False)
             self.call_from_thread(self._focus_prompt)
@@ -1187,6 +1217,7 @@ class NexusApp(App[None]):
         try:
             goal = str(preview.get("goal", ""))
             steps = preview.get("steps", [])
+            self.call_from_thread(self._start_task_log, "Plano aprovado. Vou executar os passos agora.")
             self.call_from_thread(self._write_chat, f"[bold green]🚀 EXECUTANDO {len(steps)} PASSOS...[/bold green]")
             self.call_from_thread(self._set_mission_panel, f"Executando plano: {goal}")
             result = self.bridge.execute_plan(goal, steps if isinstance(steps, list) else [])
@@ -1195,15 +1226,18 @@ class NexusApp(App[None]):
             self.call_from_thread(self._set_light, "LUZ VERDE — missao concluida")
             self.call_from_thread(self._write_log, f"[bold green]MISSION COMPLETE: {len(result.get('results', []))} etapas[/bold green]")
             self.call_from_thread(self._set_mission_panel, f"Plano concluido: {goal}")
+            self.call_from_thread(self._finish_task_log, "Plano concluido.")
         except CancelledExecution as exc:
             self.call_from_thread(self._write_chat, f"**CANCELADO:** {exc}")
             self.call_from_thread(self._write_log, f"[WARN] {exc}")
             self.call_from_thread(self._set_mission_panel, "Plano cancelado.")
+            self.call_from_thread(self._finish_task_log, "Plano cancelado.")
         except Exception as exc:
             self.monitor.set_state("error", str(exc))
             self.call_from_thread(self._write_chat, f"**ERRO:** {exc}")
             self.call_from_thread(self._write_log, f"[ERROR] {exc}")
             self.call_from_thread(self._set_mission_panel, "Falha na execucao do plano.")
+            self.call_from_thread(self._finish_task_log, "Plano terminou com erro.")
         finally:
             self.monitor.set_cancellable(False)
             self.call_from_thread(self._focus_prompt)
