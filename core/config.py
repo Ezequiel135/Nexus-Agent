@@ -12,6 +12,7 @@ from pathlib import Path
 KNOWN_PROVIDERS = ("OpenAI", "Anthropic", "Google", "Ollama", "Groq", "Custom")
 KNOWN_REMOTE_CHANNELS = ("telegram", "whatsapp")
 KNOWN_RUNTIME_MODES = ("online", "hybrid", "offline")
+KNOWN_EXECUTION_PROFILES = ("quick", "planned")
 RUNTIME_ENV_KEYS = (
     "OPENAI_API_KEY",
     "OPENAI_BASE_URL",
@@ -97,6 +98,7 @@ class NexusConfig:
     password_salt: str
     ui_mode: str = "auto"
     runtime_mode: str = "hybrid"
+    execution_profile: str = "planned"
     plan_before_execute: bool = True
     dry_run: bool = True
     startup_probe: bool = False
@@ -291,6 +293,15 @@ def normalize_runtime_mode(value: str | None) -> str:
     return "hybrid"
 
 
+def normalize_execution_profile(value: str | None) -> str:
+    normalized = (value or "").strip().lower()
+    if normalized in {"quick", "fast", "rapido", "dia-a-dia", "cotidiano"}:
+        return "quick"
+    if normalized in {"planned", "professional", "profissional", "planejado"}:
+        return "planned"
+    return "planned"
+
+
 def normalize_provider(value: str | None) -> str:
     raw = (value or "").strip()
     if not raw:
@@ -415,12 +426,14 @@ def build_initial_config(
     account: NexusAccount,
     agent: NexusAgentProfile,
     runtime_mode: str = "hybrid",
+    execution_profile: str = "planned",
 ) -> NexusConfig:
     return NexusConfig(
         password_hash=password_hash,
         password_salt=password_salt,
         ui_mode=normalize_ui_mode(ui_mode),
         runtime_mode=normalize_runtime_mode(runtime_mode),
+        execution_profile=normalize_execution_profile(execution_profile),
         accounts=[account],
         active_account_id=account.id,
         agents=[agent],
@@ -543,6 +556,7 @@ def logout_account(config: NexusConfig) -> None:
 def normalize_config(config: NexusConfig) -> NexusConfig:
     config.ui_mode = normalize_ui_mode(config.ui_mode)
     config.runtime_mode = normalize_runtime_mode(config.runtime_mode)
+    config.execution_profile = normalize_execution_profile(config.execution_profile)
     config.max_tool_rounds = max(1, int(config.max_tool_rounds or 6))
     config.max_plan_steps = max(1, int(config.max_plan_steps or 8))
     config.max_history_messages = max(4, int(config.max_history_messages or 24))
@@ -629,6 +643,7 @@ def load_config() -> NexusConfig:
         password_salt=payload["password_salt"],
         ui_mode=payload.get("ui_mode", "auto"),
         runtime_mode=payload.get("runtime_mode", "hybrid"),
+        execution_profile=payload.get("execution_profile", "planned"),
         plan_before_execute=payload.get("plan_before_execute", True),
         dry_run=payload.get("dry_run", True),
         startup_probe=payload.get("startup_probe", False),

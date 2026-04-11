@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 import shutil
 import subprocess
 import threading
@@ -13,11 +14,14 @@ from .config import NexusConfig, NexusPaths
 from .logging_utils import log_event
 from .mcp import call_mcp_tool, list_mcp_resources, list_mcp_servers, list_mcp_tools, read_mcp_resource
 from .memory import remember, search_memory
+from .privilege import PRIVILEGED_EXECUTABLES, PrivilegeSessionManager, parse_timeout_spec
 from .safeguards import (
     PATH_LIKE_RE,
+    assess_command_light,
     command_assessment,
     ensure_safe_write_path,
     normalize_user_path,
+    parse_shell_command,
 )
 from .tool_registry import ToolRegistry
 
@@ -36,6 +40,7 @@ class AcoesAgente(ToolRegistry):
         self.config = config
         self._event_callback = None
         self._cancel_event: threading.Event | None = None
+        self.privilege = PrivilegeSessionManager()
         self._register_tools()
 
     def set_event_callback(self, callback) -> None:
@@ -68,6 +73,8 @@ class AcoesAgente(ToolRegistry):
                     "comando": {"type": "string", "description": "Comando shell a executar"},
                     "timeout": {"type": "integer", "description": "Timeout opcional em segundos"},
                     "dry_run": {"type": "boolean", "description": "Se true, apenas mostra o que faria"},
+                    "elevated": {"type": "boolean", "description": "Usa sessao sudo/root ja ativada na UI/CLI atual"},
+                    "privilege": {"type": "string", "enum": ["sudo", "root"], "description": "Tipo de sessao privilegiada exigida"},
                 },
                 "required": ["comando"],
             },
@@ -245,12 +252,86 @@ class AcoesAgente(ToolRegistry):
             payload.update(extra)
         return self._json(payload)
 
+    def privilege_status(self):
+        return self.privilege.status()
+
+    def set_privilege_logging(self, enabled: bool) -> bool:
+        return self.privilege.set_logging_enabled(enabled)
+
+    def enable_sudo_session(self, timeout_spec: str | None = None, scope: str | None = None) -> tuple[bool, str]:
+        try:
+            timeout_seconds = parse_timeout_spec(timeout_spec)
+        except ValueError as exc:
+            return False, str(exc)
+        return self.privilege.enable_sudo(timeout_seconds, scope)
+
+    def request_root_session(self, timeout_spec: str | None = None, scope: str | None = None) -> tuple[bool, str]:
+        try:
+            timeout_seconds = parse_timeout_spec(timeout_spec)
+        except ValueError as exc:
+            return False, str(exc)
+        return True, self.privilege.request_root(timeout_seconds, scope)
+
+    def confirm_root_session(self) -> tuple[bool, str]:
+        return self.privilege.confirm_root()
+
+    def disable_privilege_session(self, *, reason: str = "manual") -> str:
+        return self.privilege.disable(reason=reason)
+
+    def assess_command_preview(self, command: str, *, elevated: bool = False) -> str:
+        extra_safe = PRIVILEGED_EXECUTABLES if elevated else None
+        return assess_command_light(command, extra_safe_executables=extra_safe)
+
+    def _normalize_privileged_command(
+        self,
+        comando: str,
+        *,
+        elevated: bool | None = None,
+        privilege: str | None = None,
+    ) -> tuple[str, bool, str]:
+        raw = (comando or "").strip()
+        elevated_requested = bool(elevated)
+        requested_mode = (privilege or "sudo").strip().lower()
+        if not raw:
+            raise ValueError("Comando vazio.")
+        try:
+            argv = parse_shell_command(raw)
+        except ValueError:
+            return raw, elevated_requested, requested_mode
+
+        if argv and argv[0].lower() == "sudo":
+            filtered = [token for token in argv[1:] if token not in {"-n", "-k", "-S"}]
+            if not filtered or filtered[0].startswith("-"):
+                raise ValueError("Use o comando real sem opcoes de sudo. Ative a sessao com /sudo on ou /root on.")
+            raw = " ".join(shlex.quote(token) for token in filtered)
+            elevated_requested = True
+        if requested_mode not in {"sudo", "root"}:
+            requested_mode = "sudo"
+        return raw, elevated_requested, requested_mode
+
     # --- Ferramentas ---
 
-    def executar_comando(self, comando: str, timeout: int | None = None, dry_run: bool | None = None) -> str:
-        assessment = command_assessment(comando)
+    def executar_comando(
+        self,
+        comando: str,
+        timeout: int | None = None,
+        dry_run: bool | None = None,
+        elevated: bool | None = None,
+        privilege: str | None = None,
+    ) -> str:
+        try:
+            normalized_command, elevated_requested, requested_mode = self._normalize_privileged_command(
+                comando,
+                elevated=elevated,
+                privilege=privilege,
+            )
+        except ValueError as exc:
+            return self._json({"ok": False, "erro": str(exc)})
+
+        extra_safe = PRIVILEGED_EXECUTABLES if elevated_requested else None
+        assessment = command_assessment(normalized_command, extra_safe_executables=extra_safe)
         if not assessment.allowed:
-            line = log_event("BLOQUEADO", comando, status="BLOCKED", metadata={"reason": assessment.reason})
+            line = log_event("BLOQUEADO", normalized_command, status="BLOCKED", metadata={"reason": assessment.reason})
             self._emit(line)
             return self._json(
                 {
@@ -263,13 +344,17 @@ class AcoesAgente(ToolRegistry):
 
         effective_dry_run = self._effective_dry_run(dry_run)
         if assessment.needs_confirmation and effective_dry_run:
-            line = log_event("DRY_RUN", comando, status="WARN", metadata={"reason": assessment.reason})
+            line = log_event("DRY_RUN", normalized_command, status="WARN", metadata={"reason": assessment.reason})
             self._emit(line)
             return self._preview_payload(
                 "executar_comando",
-                comando,
+                normalized_command,
                 reason=assessment.reason,
-                extra={"argv": assessment.argv},
+                extra={
+                    "argv": assessment.argv,
+                    "privileged": elevated_requested,
+                    "privilege_mode": requested_mode if elevated_requested else "none",
+                },
             )
 
         snapshots: list[str] = []
@@ -284,15 +369,28 @@ class AcoesAgente(ToolRegistry):
                 if snapshot:
                     snapshots.append(snapshot)
 
+        execution_argv = assessment.argv
+        if elevated_requested:
+            try:
+                execution_argv = self.privilege.prepare_argv(assessment.argv, requested_mode=requested_mode)
+            except RuntimeError as exc:
+                return self._json({"ok": False, "erro": str(exc), "requires_privilege_session": True})
+
         log_event(
             "EXECUTANDO",
-            comando,
-            metadata={"argv": assessment.argv, "timeout": timeout or DEFAULT_COMMAND_TIMEOUT_SECONDS},
+            normalized_command,
+            metadata={
+                "argv": execution_argv,
+                "timeout": timeout or DEFAULT_COMMAND_TIMEOUT_SECONDS,
+                "privileged": elevated_requested,
+                "privilege_mode": requested_mode if elevated_requested else "none",
+            },
         )
-        self._emit(f"EXECUTANDO: {assessment.executable} {' '.join(assessment.argv[1:])}".strip())
+        prefix = f"{requested_mode.upper()} " if elevated_requested else ""
+        self._emit(f"EXECUTANDO: {prefix}{assessment.executable} {' '.join(assessment.argv[1:])}".strip())
 
         proc = subprocess.Popen(
-            assessment.argv,
+            execution_argv,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -307,7 +405,7 @@ class AcoesAgente(ToolRegistry):
                     proc.wait(timeout=1)
                 except subprocess.TimeoutExpired:
                     proc.kill()
-                line = log_event("CANCELADO", comando, status="WARN")
+                line = log_event("CANCELADO", normalized_command, status="WARN")
                 self._emit(line)
                 raise CancelledExecution("Comando cancelado pelo usuario.")
             if time.monotonic() - started > effective_timeout:
@@ -316,9 +414,16 @@ class AcoesAgente(ToolRegistry):
                     proc.wait(timeout=1)
                 except subprocess.TimeoutExpired:
                     proc.kill()
-                line = log_event("TIMEOUT", comando, status="ERROR")
+                line = log_event("TIMEOUT", normalized_command, status="ERROR")
                 self._emit(line)
-                return self._json({"ok": False, "erro": f"Timeout apos {effective_timeout}s", "backups": snapshots})
+                return self._json(
+                    {
+                        "ok": False,
+                        "erro": f"Timeout apos {effective_timeout}s",
+                        "backups": snapshots,
+                        "privileged": elevated_requested,
+                    }
+                )
             time.sleep(COMMAND_POLL_INTERVAL_SECONDS)
 
         stdout, stderr = proc.communicate()
@@ -328,10 +433,12 @@ class AcoesAgente(ToolRegistry):
             "stdout": (stdout or "").strip(),
             "stderr": (stderr or "").strip(),
             "backups": snapshots,
+            "privileged": elevated_requested,
+            "privilege_mode": requested_mode if elevated_requested else "none",
         }
         line = log_event(
             "RESULTADO",
-            f"{comando} rc={proc.returncode}",
+            f"{normalized_command} rc={proc.returncode}",
             status="OK" if proc.returncode == 0 else "ERROR",
             metadata={"returncode": proc.returncode},
         )

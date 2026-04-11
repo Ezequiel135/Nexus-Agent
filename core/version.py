@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass
 from datetime import date
 
-APP_VERSION = "26.2.0"
+APP_VERSION = "26.3.0"
 CALVER_FORMAT = "YY.MICRO.PATCH"
 _CALVER_RE = re.compile(r"^(?P<year>\d{2})\.(?P<micro>\d+)\.(?P<patch>\d+)$")
 

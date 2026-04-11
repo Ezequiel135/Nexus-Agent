@@ -20,6 +20,8 @@ SYSTEM_PROMPT = (
     "Planeje antes de agir, explique brevemente o que esta fazendo e use ferramentas apenas quando necessario. "
     "Nunca assuma permissao irrestrita; respeite dry-run, confirmacoes, limites do runtime e modo offline. "
     "Se uma acao for arriscada, mostre o plano e sinalize a necessidade de aprovacao. "
+    "Para tarefas simples de abrir app, mouse, teclado, busca local e atalhos visuais, prefira o menor numero de passos possivel. "
+    "Nao prefixe comandos com sudo manualmente; use execucao privilegiada apenas se a sessao sudo/root estiver ativa. "
     "Se o runtime estiver sem LLM remoto, ofereca modo offline local, comandos slash e instrucoes de configuracao. "
     "Se a tarefa envolver tela, mouse, teclado ou browser, use as ferramentas visuais. "
     "Se a tarefa pedir contexto externo vindo de um servidor MCP, use a ferramenta consultar_mcp. "
@@ -57,8 +59,13 @@ _CACHE_LOCK = threading.Lock()
 
 def runtime_prompt(config: NexusConfig) -> str:
     parts: list[str] = [f"Runtime: {config.runtime_mode}."]
+    execution_profile = getattr(config, "execution_profile", "planned")
     account = config.active_account
     agent = config.active_agent
+    if execution_profile == "quick":
+        parts.append("Perfil de execucao: dia a dia. Evite decomposicao longa e reduza passos em tarefas obvias.")
+    else:
+        parts.append("Perfil de execucao: profissional. Planejamento cuidadoso e fluxo completo habilitados.")
     if account is not None:
         parts.append(f"Conta ativa: {account.name}. Provider: {account.provider_label}. Modelo: {account.model_name}.")
     else:

@@ -81,6 +81,19 @@ CONFIRMATION_EXECUTABLES = {
     "uv",
 }
 
+READ_ONLY_PRIVILEGED_EXECUTABLES = {
+    "journalctl",
+}
+
+READ_ONLY_PRIVILEGED_SUBCOMMANDS = {
+    "apt": {"list", "policy", "search", "show"},
+    "dpkg": {"--list", "--status", "-l", "-s"},
+    "flatpak": {"info", "list", "search"},
+    "snap": {"find", "info", "list"},
+    "systemctl": {"cat", "is-active", "is-enabled", "list-unit-files", "list-units", "show", "status"},
+    "timedatectl": {"show", "status"},
+}
+
 CRITICAL_PATH_PREFIXES = (
     "/",
     "/bin",
@@ -182,9 +195,10 @@ def parse_shell_command(command: str) -> list[str]:
     return argv
 
 
-def command_assessment(command: str) -> CommandAssessment:
+def command_assessment(command: str, extra_safe_executables: set[str] | None = None) -> CommandAssessment:
     raw = (command or "").strip()
     lowered = raw.lower()
+    extra_safe_executables = {item.lower() for item in (extra_safe_executables or set())}
 
     for pattern, reason in BLOCKED_RULES:
         if pattern.search(lowered):
@@ -196,10 +210,17 @@ def command_assessment(command: str) -> CommandAssessment:
         return CommandAssessment(False, "red", str(exc))
 
     executable = argv[0].lower()
-    if executable not in SAFE_EXECUTABLES:
+    if executable not in SAFE_EXECUTABLES and executable not in extra_safe_executables:
         return CommandAssessment(False, "red", f"Executavel fora da whitelist: {executable}", executable=executable, argv=argv)
 
-    modifies_state = executable in CONFIRMATION_EXECUTABLES
+    modifies_state = executable in CONFIRMATION_EXECUTABLES or executable in extra_safe_executables
+    if executable in extra_safe_executables:
+        if executable in READ_ONLY_PRIVILEGED_EXECUTABLES:
+            modifies_state = False
+        else:
+            first_non_flag = next((token for token in argv[1:] if not token.startswith("-")), "")
+            if first_non_flag and first_non_flag in READ_ONLY_PRIVILEGED_SUBCOMMANDS.get(executable, set()):
+                modifies_state = False
 
     if executable == "git":
         modifies_state = any(
@@ -255,8 +276,8 @@ def command_is_safe(command: str) -> tuple[bool, str]:
     return False, f"{prefix}: {assessment.reason}"
 
 
-def assess_command_light(command: str) -> str:
-    assessment = command_assessment(command)
+def assess_command_light(command: str, extra_safe_executables: set[str] | None = None) -> str:
+    assessment = command_assessment(command, extra_safe_executables=extra_safe_executables)
     if assessment.level == "green":
         return LIGHT_GREEN
     if assessment.level == "yellow":

@@ -26,6 +26,22 @@ O formato segue a ideia de:
 - Corrigido o CSS inválido da `NexusApp` que causava falha no parser do Textual.
 - Corrigido o mount da `NexusApp` ao aceitar `id=` em `GreenLightBar`.
 
+## [26.3.0] - 2026-04-11
+
+### Added
+- Tela inicial com splash/loading e seletor de perfil `Dia a dia` vs `Profissional` antes de entrar no chat visual.
+- Sessão temporária de `sudo`/`root` com timeout, confirmação dupla no `root`, escopo limitado por executável e log opcional.
+- Testes cobrindo fluxo do launcher visual, perfil rápido e exigência de sessão privilegiada para comandos elevados.
+
+### Changed
+- O perfil `Dia a dia` agora reduz o planejamento para tarefas simples de mouse, teclado, abrir app e ações diretas.
+- O perfil `Profissional` mantém o fluxo completo com preview de plano, mais rodadas e execução mais cuidadosa.
+- A UI visual e o modo plain agora expõem comandos `/profile`, `/sudo` e `/root`.
+
+### Fixed
+- O Nexus não força mais um fluxo de 6 passos em pedidos simples quando a sessão está em modo rápido.
+- Comandos privilegiados agora falham de forma explícita quando a sessão `sudo/root` não foi ativada pelo usuário.
+
 ## [26.2.0] - 2026-04-10
 
 ### Added

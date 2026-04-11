@@ -225,7 +225,10 @@ def handle_doctor() -> int:
     if config is not None:
         active_account = config.active_account.name if config.active_account else "-"
         active_agent = config.active_agent.name if config.active_agent else "-"
-        print(f"runtime_mode={config.runtime_mode} dry_run={config.dry_run} plan_before_execute={config.plan_before_execute}")
+        print(
+            f"runtime_mode={config.runtime_mode} execution_profile={getattr(config, 'execution_profile', 'planned')} "
+            f"dry_run={config.dry_run} plan_before_execute={config.plan_before_execute}"
+        )
         print(f"accounts={len(config.accounts)} active_account={active_account}")
         print(f"agents={len(config.agents)} active_agent={active_agent}")
         print(f"mcp_servers={len(config.mcp_servers)}")

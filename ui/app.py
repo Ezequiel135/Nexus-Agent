@@ -11,6 +11,7 @@ import getpass
 import json
 import threading
 from dataclasses import dataclass
+from typing import Any
 
 from rich.markdown import Markdown
 from textual.app import App, ComposeResult
@@ -28,14 +29,16 @@ from core.config import (
     make_agent,
     normalize_provider,
     normalize_runtime_mode,
+    normalize_execution_profile,
     provider_requires_api_key,
     save_config,
 )
+from core.execution import apply_execution_profile, profile_description, profile_label, should_preview_plan
 from core.llm import LiteLLMBridge
 from core.logging_utils import log_event
 from core.memory import clear_memory, memory_summary, remember
 from core.state import ActivityMonitor, LIGHT_COLORS, LIGHT_SYMBOLS
-from core.safeguards import assess_command_light, blocked_examples, blocked_reasons
+from core.safeguards import blocked_examples, blocked_reasons
 from core.version import APP_VERSION
 
 
@@ -576,11 +579,72 @@ class NexusApp(App[None]):
     .hint-box { color: white; background: #0b1722; border: round #245c7a; padding: 0 1; margin-bottom: 1; }
     #mission-panel { height: auto; border: round #ff4fd8; margin-bottom: 1; padding: 1; background: #12081a; }
     #light-bar { text-style: bold; dock: top; height: 1; content-align: center middle; background: #0a2a0a; }
+    #startup-overlay {
+        layer: overlay;
+        width: 1fr;
+        height: 1fr;
+        align: center middle;
+        background: rgba(3, 6, 10, 0.94);
+    }
+    #startup-card {
+        width: 88;
+        max-width: 96%;
+        height: auto;
+        border: round #24c8ff;
+        background: #091521;
+        padding: 1 2;
+    }
+    #startup-brand {
+        color: #7ef5c5;
+        text-style: bold;
+    }
+    #startup-title {
+        color: #ffffff;
+        text-style: bold;
+        margin-top: 1;
+    }
+    #startup-lead {
+        color: #b1d5e5;
+        margin-top: 1;
+    }
+    #startup-status {
+        border: round #245c7a;
+        background: #0c1b28;
+        color: #dff3ff;
+        padding: 1;
+        margin-top: 1;
+    }
+    #startup-actions {
+        height: auto;
+        margin-top: 1;
+    }
+    .mode-button {
+        width: 1fr;
+        min-height: 5;
+        margin-right: 1;
+    }
+    #profile_quick {
+        background: #2ee6a6;
+        color: #041410;
+        border: none;
+        text-style: bold;
+    }
+    #profile_planned {
+        background: #122637;
+        color: #f3fbff;
+        border: round #24c8ff;
+        text-style: bold;
+    }
+    #startup-note {
+        color: #94b5c9;
+        margin-top: 1;
+    }
     """
 
     BINDINGS = [
         ("ctrl+c", "quit", "Sair"),
         ("ctrl+m", "mission_mode", "Auto Plan"),
+        ("ctrl+l", "show_launcher", "Launcher"),
         ("escape", "cancel_current", "Cancelar"),
     ]
 
@@ -594,6 +658,10 @@ class NexusApp(App[None]):
         self.pending_plan: dict[str, Any] | None = None
         self.cancel_event = threading.Event()
         self.worker_thread: threading.Thread | None = None
+        self.startup_ready = False
+        self.launcher_visible = initial_task is None
+        self._loading_frame = 0
+        self._loading_base = "Carregando modulos, contexto e sessao"
 
     def compose(self) -> ComposeResult:
         yield GreenLightBar(id="light-bar")
@@ -615,6 +683,22 @@ class NexusApp(App[None]):
                     classes="hint-box",
                 )
                 yield RichLog(id="action-log", markup=True, wrap=True)
+        with Container(id="startup-overlay"):
+            with Vertical(id="startup-card"):
+                yield Static(f"NEXUS AGENT {APP_VERSION}", id="startup-brand")
+                yield Static("Inicializando sessao visual", id="startup-title")
+                yield Static(
+                    "A interface abre primeiro com uma tela de carregamento e depois oferece o modo Dia a dia ou Profissional.",
+                    id="startup-lead",
+                )
+                yield Static("Carregando...", id="startup-status")
+                with Horizontal(id="startup-actions"):
+                    yield Button("Dia a dia\nMenos passos", id="profile_quick", classes="mode-button")
+                    yield Button("Profissional\nPlanejamento completo", id="profile_planned", classes="mode-button")
+                yield Static(
+                    "Dia a dia reduz etapas para tarefas simples. Profissional mantem preview de plano e fluxo completo.",
+                    id="startup-note",
+                )
         yield StatusBar(self.monitor, self.bridge.config)
         yield Footer()
 
@@ -624,8 +708,37 @@ class NexusApp(App[None]):
             self.bridge.actions.set_cancel_event(self.cancel_event)
         self.query_one("#chat-log", RichLog).can_focus = False
         self.query_one("#action-log", RichLog).can_focus = False
+        self.query_one("#startup-actions", Horizontal).display = False
+        self.set_interval(0.25, self._tick_startup)
+        self.call_after_refresh(self._focus_startup_target)
+        threading.Thread(target=self._bootstrap_session, daemon=True).start()
+
+    def _focus_prompt(self) -> None:
+        self.query_one("#prompt", Input).focus()
+
+    def _focus_startup_target(self) -> None:
+        if self.launcher_visible and self.startup_ready:
+            self.query_one("#profile_quick", Button).focus()
+            return
+        if self.launcher_visible:
+            self.query_one("#startup-overlay", Container).focus()
+            return
+        self._focus_prompt()
+
+    def _tick_startup(self) -> None:
+        if self.startup_ready:
+            return
+        self._loading_frame = (self._loading_frame + 1) % 4
+        dots = "." * (self._loading_frame + 1)
+        self.query_one("#startup-status", Static).update(f"{self._loading_base}{dots}")
+
+    def _bootstrap_session(self) -> None:
         self.conversation = self._load_history()
         ok, message = self.bridge.handshake()
+        self.call_from_thread(self._finish_bootstrap, ok, message)
+
+    def _finish_bootstrap(self, ok: bool, message: str) -> None:
+        self.startup_ready = True
         self._write_chat(f"[bold green]NEXUS AGENT {APP_VERSION} ONLINE[/bold green]" if ok else f"[bold red]{message}[/bold red]")
         self._write_chat(
             "Use esta interface como um agente local com preview de plano, dry-run e cancelamento. "
@@ -643,14 +756,41 @@ class NexusApp(App[None]):
             self._write_log(f"Remote bots: {len(self.bridge.config.remote_integrations)} integracao(oes) | {state}")
         self._write_log(f"Notebook root: {NexusPaths.notebooks_dir}")
         self._write_log("Auto plan, dry-run e cancelamento por Esc habilitados. Execucao paralela disponivel via CLI.")
-        self.call_after_refresh(self._focus_prompt)
-        self.set_timer(0.05, self._focus_prompt)
         if self.initial_task:
+            self.launcher_visible = False
+            self.query_one("#startup-overlay", Container).display = False
+            self.call_after_refresh(self._focus_prompt)
+            self.set_timer(0.05, self._focus_prompt)
             self.query_one("#prompt", Input).value = self.initial_task
             self._submit_prompt(self.initial_task)
+            return
+        self._show_launcher()
 
-    def _focus_prompt(self) -> None:
-        self.query_one("#prompt", Input).focus()
+    def _show_launcher(self) -> None:
+        profile = normalize_execution_profile(getattr(self.bridge.config, "execution_profile", "planned"))
+        self.launcher_visible = True
+        self.query_one("#startup-overlay", Container).display = True
+        self.query_one("#startup-title", Static).update("Escolha o foco desta sessao")
+        self.query_one("#startup-status", Static).update(
+            f"Conta: {(self.bridge.config.active_account.name if self.bridge.config.active_account else '-')} | "
+            f"Perfil salvo: {profile_label(profile)} | Runtime: {getattr(self.bridge.config, 'runtime_mode', '-')}"
+        )
+        self.query_one("#startup-actions", Horizontal).display = True
+        self.query_one("#startup-note", Static).update(
+            f"Atual: {profile_label(profile)}. {profile_description(profile)} "
+            "Voce pode reabrir esta tela com Ctrl+L ou /launcher."
+        )
+        self.call_after_refresh(self._focus_startup_target)
+
+    def _close_launcher(self) -> None:
+        self.launcher_visible = False
+        self.query_one("#startup-overlay", Container).display = False
+        self._set_mission_panel(
+            f"Perfil atual: {profile_label(getattr(self.bridge.config, 'execution_profile', 'planned'))} | "
+            f"dry_run={self.bridge.config.dry_run} | runtime={self.bridge.config.runtime_mode}"
+        )
+        self.call_after_refresh(self._focus_prompt)
+        self.set_timer(0.05, self._focus_prompt)
 
     def _write_chat(self, text: str) -> None:
         self.query_one("#chat-log", RichLog).write(Markdown(text))
@@ -703,12 +843,7 @@ class NexusApp(App[None]):
         self.worker_thread.start()
 
     def _should_preview_plan(self, prompt: str) -> bool:
-        lowered = prompt.lower()
-        keywords = ["organizar", "criar", "baixar", "instalar", "configurar", "buscar", "processar", "mover", "apagar"]
-        return bool(
-            self.bridge.config.plan_before_execute
-            and (len(prompt.split()) > 4 or any(word in lowered for word in keywords))
-        )
+        return should_preview_plan(self.bridge.config, prompt)
 
     def action_mission_mode(self) -> None:
         self.bridge.config.plan_before_execute = not self.bridge.config.plan_before_execute
@@ -717,6 +852,24 @@ class NexusApp(App[None]):
             f"Auto plan {'ativado' if self.bridge.config.plan_before_execute else 'desativado'} | "
             f"dry_run={self.bridge.config.dry_run} | runtime={self.bridge.config.runtime_mode}"
         )
+
+    def action_show_launcher(self) -> None:
+        if not self.startup_ready or self._worker_running():
+            return
+        self._show_launcher()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "profile_quick":
+            self._apply_profile_and_enter("quick")
+            return
+        if event.button.id == "profile_planned":
+            self._apply_profile_and_enter("planned")
+
+    def _apply_profile_and_enter(self, profile: str) -> None:
+        normalized = apply_execution_profile(self.bridge.config, profile)
+        save_config(self.bridge.config)
+        self._write_log(f"Perfil de execucao: {profile_label(normalized)}")
+        self._close_launcher()
 
     def action_cancel_current(self) -> None:
         self.cancel_event.set()
@@ -735,9 +888,13 @@ class NexusApp(App[None]):
                         "**Comandos locais**",
                         "- `/help` ajuda",
                         "- `/settings` runtime/dry-run/auto-plan",
+                        "- `/profile quick|planned` alterna Dia a dia e Profissional",
+                        "- `/launcher` reabre a tela inicial",
                         "- `/plan on|off` liga/desliga preview automatico",
                         "- `/dry-run on|off` liga/desliga dry-run",
                         "- `/mode online|hybrid|offline` troca runtime atual",
+                        "- `/sudo status|on|off|log on|off` controla sudo temporario",
+                        "- `/root on|confirm|off|status` controla root temporario",
                         "- `/approve` executa plano pendente",
                         "- `/cancel` cancela plano pendente/execucao",
                         "- `/status`, `/tools`, `/memory`, `/blocked`, `/accounts`, `/agents`, `/mcp`, `/remote`, `/clear`",
@@ -753,8 +910,10 @@ class NexusApp(App[None]):
                         "**Status**",
                         f"- state={snap.state}",
                         f"- runtime={self.bridge.config.runtime_mode}",
+                        f"- profile={profile_label(getattr(self.bridge.config, 'execution_profile', 'planned'))}",
                         f"- dry_run={self.bridge.config.dry_run}",
                         f"- plan_before_execute={self.bridge.config.plan_before_execute}",
+                        f"- privilege={self.bridge.actions.privilege_status().summary()}",
                         f"- model={snap.current_model}",
                         f"- detail={snap.detail or '-'}",
                     ]
@@ -767,14 +926,19 @@ class NexusApp(App[None]):
                     [
                         "**Settings**",
                         f"- runtime={self.bridge.config.runtime_mode}",
+                        f"- execution_profile={getattr(self.bridge.config, 'execution_profile', 'planned')}",
                         f"- dry_run={self.bridge.config.dry_run}",
                         f"- plan_before_execute={self.bridge.config.plan_before_execute}",
                         f"- llm_cache_enabled={self.bridge.config.llm_cache_enabled}",
                         f"- max_tool_rounds={self.bridge.config.max_tool_rounds}",
                         f"- max_output_tokens={self.bridge.config.max_output_tokens}",
+                        f"- privilege={self.bridge.actions.privilege_status().summary()}",
                     ]
                 )
             )
+            return
+        if command == "/launcher":
+            self.action_show_launcher()
             return
         if command in {"/approve", "/run"}:
             if self.pending_plan is None:
@@ -793,6 +957,10 @@ class NexusApp(App[None]):
             self.bridge.config.plan_before_execute = value in {"on", "1", "true", "auto"}
             self._write_log(f"plan_before_execute={self.bridge.config.plan_before_execute}")
             return
+        if command.startswith("/profile "):
+            value = command.split(" ", 1)[1].strip()
+            self._apply_profile_and_enter(value)
+            return
         if command.startswith("/dry-run "):
             value = command.split(" ", 1)[1].strip()
             self.bridge.config.dry_run = value in {"on", "1", "true"}
@@ -805,6 +973,18 @@ class NexusApp(App[None]):
                 return
             self.bridge.config.runtime_mode = value
             self._write_log(f"runtime_mode={value}")
+            return
+        if command.startswith("/sudo "):
+            self._handle_sudo_command(command)
+            return
+        if command == "/sudo":
+            self._handle_sudo_command("/sudo status")
+            return
+        if command.startswith("/root "):
+            self._handle_root_command(command)
+            return
+        if command == "/root":
+            self._handle_root_command("/root status")
             return
         if command == "/tools":
             self._write_chat(f"```text\n{self.bridge.actions.capabilities_summary()}\n```")
@@ -867,6 +1047,66 @@ class NexusApp(App[None]):
             return
         self._write_log(f"Comando desconhecido: {prompt}")
 
+    def _run_with_terminal_release(self, callback):
+        try:
+            with self.suspend():
+                return callback()
+        except Exception:
+            return callback()
+
+    def _handle_sudo_command(self, command: str) -> None:
+        parts = command.split()
+        action = parts[1] if len(parts) > 1 else "status"
+        if action == "status":
+            self._write_log(self.bridge.actions.privilege_status().summary())
+            return
+        if action == "off":
+            self._write_log(self.bridge.actions.disable_privilege_session(reason="manual"))
+            return
+        if action == "log":
+            if len(parts) < 3 or parts[2] not in {"on", "off"}:
+                self._write_log("Use /sudo log on|off")
+                return
+            enabled = self.bridge.actions.set_privilege_logging(parts[2] == "on")
+            self._write_log(f"privilege_log={enabled}")
+            return
+        if action != "on":
+            self._write_log("Use /sudo status|on [timeout] [escopo]|off|log on|off")
+            return
+        timeout_spec = parts[2] if len(parts) >= 3 else None
+        scope = parts[3] if len(parts) >= 4 else None
+        self._write_chat("Digite a senha manualmente no prompt nativo do `sudo`. O Nexus nao salva a senha.")
+        ok, message = self._run_with_terminal_release(lambda: self.bridge.actions.enable_sudo_session(timeout_spec, scope))
+        self._write_log(message)
+        if ok:
+            self._set_mission_panel(f"Privilegio ativo: {self.bridge.actions.privilege_status().summary()}")
+
+    def _handle_root_command(self, command: str) -> None:
+        parts = command.split()
+        action = parts[1] if len(parts) > 1 else "status"
+        if action == "status":
+            self._write_log(self.bridge.actions.privilege_status().summary())
+            return
+        if action == "off":
+            self._write_log(self.bridge.actions.disable_privilege_session(reason="manual"))
+            return
+        if action == "confirm":
+            self._write_chat("Confirmacao root em andamento. Digite a senha manualmente no prompt nativo do `sudo`.")
+            ok, message = self._run_with_terminal_release(self.bridge.actions.confirm_root_session)
+            self._write_log(message)
+            if ok:
+                self._set_mission_panel(f"Privilegio ativo: {self.bridge.actions.privilege_status().summary()}")
+            return
+        if action != "on":
+            self._write_log("Use /root on [timeout] [escopo]|confirm|off|status")
+            return
+        timeout_spec = parts[2] if len(parts) >= 3 else None
+        scope = parts[3] if len(parts) >= 4 else None
+        ok, message = self.bridge.actions.request_root_session(timeout_spec, scope)
+        self._write_log(message)
+        if ok:
+            self._set_mission_panel("Root pendente de confirmacao dupla. Use /root confirm.")
+
     def _process_simple(self, prompt: str) -> None:
         try:
             log_event("PROMPT", prompt)
@@ -918,7 +1158,11 @@ class NexusApp(App[None]):
             if steps:
                 for step in steps:
                     if step.get("tool") == "executar_comando":
-                        assessment = assess_command_light(str(step.get("args", {}).get("comando", "")))
+                        args = step.get("args", {}) if isinstance(step.get("args", {}), dict) else {}
+                        assessment = self.bridge.actions.assess_command_preview(
+                            str(args.get("comando", "")),
+                            elevated=bool(args.get("elevated")),
+                        )
                         self.call_from_thread(self._set_light, assessment)
                         if "VERMELHA" in assessment.upper():
                             break

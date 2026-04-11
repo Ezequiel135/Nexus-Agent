@@ -9,7 +9,9 @@ from unittest.mock import patch
 
 from core.actions import AcoesAgente
 from core.config import NexusPaths, build_initial_config, make_account, make_agent
+from core.execution import apply_execution_profile, should_preview_plan
 from core.llm import LiteLLMBridge
+from core.privilege import PrivilegeSessionManager
 from core.safeguards import command_assessment
 from core.state import ActivityMonitor
 
@@ -35,6 +37,13 @@ class SecurityRuntimeTests(unittest.TestCase):
         self.assertTrue(assessment.allowed)
         self.assertEqual(assessment.level, "yellow")
         self.assertTrue(assessment.needs_confirmation)
+
+    def test_privileged_read_only_command_can_be_classified_as_green(self) -> None:
+        assessment = command_assessment("systemctl status ssh", extra_safe_executables={"systemctl"})
+
+        self.assertTrue(assessment.allowed)
+        self.assertEqual(assessment.level, "green")
+        self.assertFalse(assessment.needs_confirmation)
 
     def test_file_write_handles_disk_errors_gracefully(self) -> None:
         actions = AcoesAgente(SimpleNamespace(dry_run=False, max_memory_items=6))
@@ -77,6 +86,37 @@ class SecurityRuntimeTests(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertTrue(payload["dry_run"])
         self.assertTrue(still_exists)
+
+    def test_quick_profile_avoids_plan_for_simple_app_opening_prompt(self) -> None:
+        config = make_config()
+        apply_execution_profile(config, "quick")
+
+        self.assertFalse(should_preview_plan(config, "abre o firefox e escreve openai na busca"))
+
+    def test_elevated_command_requires_active_privilege_session(self) -> None:
+        config = make_config()
+        actions = AcoesAgente(config)
+
+        payload = json.loads(actions.executar_comando("systemctl status ssh", elevated=True, privilege="sudo"))
+
+        self.assertFalse(payload["ok"])
+        self.assertTrue(payload["requires_privilege_session"])
+        self.assertIn("nao esta ativa", payload["erro"])
+
+    def test_root_activation_needs_confirm_and_becomes_active_after_manual_approval(self) -> None:
+        manager = PrivilegeSessionManager()
+
+        message = manager.request_root(600, "systemctl")
+        self.assertIn("Confirmacao dupla", message)
+        self.assertTrue(manager.status().pending_root)
+
+        with patch("core.privilege.subprocess.run", return_value=SimpleNamespace(returncode=0)):
+            ok, activation_message = manager.confirm_root()
+
+        self.assertTrue(ok)
+        self.assertIn("root ativo", activation_message)
+        self.assertTrue(manager.status().active)
+        self.assertEqual(manager.status().mode, "root")
 
 
 if __name__ == "__main__":

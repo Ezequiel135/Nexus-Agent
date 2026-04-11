@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nexus-agent"
-version = "26.2.0"
+version = "26.3.0"
 description = "Nexus Agent local autonomy CLI with visual/plain interfaces and desktop bridge services"
 readme = "README.md"
 requires-python = ">=3.10"

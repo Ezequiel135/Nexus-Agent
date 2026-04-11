@@ -15,7 +15,8 @@ from rich.panel import Panel
 from rich.table import Table
 
 from core.actions import CancelledExecution
-from core.config import NexusPaths
+from core.config import NexusPaths, save_config
+from core.execution import apply_execution_profile, profile_label, should_preview_plan
 from core.llm import LiteLLMBridge
 from core.logging_utils import log_event
 from core.memory import clear_memory, memory_summary, remember
@@ -35,6 +36,7 @@ def format_session_summary(config) -> str:
     return (
         f"Conta ativa: {account_name}\n"
         f"Agente ativo: {agent_name}\n"
+        f"Perfil: {profile_label(getattr(config, 'execution_profile', 'planned'))}\n"
         f"Provider: {provider}\n"
         f"Modelo: {model_name}\n"
         f"Workspace Nexus: {NexusPaths.base_dir}"
@@ -157,12 +159,7 @@ class PlainNexusCLI:
             self.console.print(Panel.fit(str(exc), title="ERRO", border_style="red"))
 
     def _should_preview_plan(self, prompt: str) -> bool:
-        lowered = prompt.lower()
-        keywords = ["organizar", "criar", "baixar", "instalar", "configurar", "buscar", "processar", "mover", "apagar"]
-        return bool(
-            self.bridge.config.plan_before_execute
-            and (len(prompt.split()) > 4 or any(word in lowered for word in keywords))
-        )
+        return should_preview_plan(self.bridge.config, prompt)
 
     def _render_plan_preview(self, preview: dict[str, object]) -> None:
         steps = preview.get("steps", []) if isinstance(preview, dict) else []
@@ -221,9 +218,12 @@ class PlainNexusCLI:
             table.add_row("/forget-all", "Apaga toda a memoria local")
             table.add_row("/blocked", "Mostra comandos bloqueados")
             table.add_row("/settings", "Mostra runtime, dry-run e auto-plan")
+            table.add_row("/profile quick|planned", "Troca entre Dia a dia e Profissional")
             table.add_row("/plan on|off", "Liga/desliga preview automatico de plano")
             table.add_row("/dry-run on|off", "Liga/desliga modo dry-run")
             table.add_row("/mode online|hybrid|offline", "Troca o runtime atual")
+            table.add_row("/sudo status|on|off|log", "Controla sudo temporario da sessao atual")
+            table.add_row("/root on|confirm|off|status", "Controla root temporario com dupla confirmacao")
             table.add_row("/approve", "Executa o plano pendente")
             table.add_row("/cancel", "Cancela plano pendente/execucao atual")
             table.add_row("/clear", "Limpa a tela")
@@ -238,9 +238,11 @@ class PlainNexusCLI:
                     f"autonomous={snap.autonomous_mode}\n"
                     f"conta={(self.bridge.config.active_account.name if self.bridge.config.active_account else '-')}\n"
                     f"agente={(self.bridge.config.active_agent.name if self.bridge.config.active_agent else '-')}\n"
+                    f"perfil={profile_label(getattr(self.bridge.config, 'execution_profile', 'planned'))}\n"
                     f"mcp={len(self.bridge.config.mcp_servers)}\n"
                     f"notebooks_dir={NexusPaths.notebooks_dir}\n"
-                    f"remote={len(self.bridge.config.remote_integrations)} armed={self.bridge.config.remote_armed}",
+                    f"remote={len(self.bridge.config.remote_integrations)} armed={self.bridge.config.remote_armed}\n"
+                    f"privilegio={self.bridge.actions.privilege_status().summary()}",
                     title="Status",
                     border_style="yellow",
                 )
@@ -340,14 +342,22 @@ class PlainNexusCLI:
             self.console.print(
                 Panel.fit(
                     f"runtime={self.bridge.config.runtime_mode}\n"
+                    f"execution_profile={getattr(self.bridge.config, 'execution_profile', 'planned')}\n"
                     f"dry_run={self.bridge.config.dry_run}\n"
                     f"plan_before_execute={self.bridge.config.plan_before_execute}\n"
                     f"cache={self.bridge.config.llm_cache_enabled}\n"
-                    f"max_tool_rounds={self.bridge.config.max_tool_rounds}",
+                    f"max_tool_rounds={self.bridge.config.max_tool_rounds}\n"
+                    f"privilege={self.bridge.actions.privilege_status().summary()}",
                     title="Settings",
                     border_style="bright_blue",
                 )
             )
+            return False
+        if command.startswith("/profile "):
+            value = command.split(" ", 1)[1].strip()
+            profile = apply_execution_profile(self.bridge.config, value)
+            save_config(self.bridge.config)
+            self.console.print(f"[green]Perfil ativo: {profile_label(profile)}[/green]")
             return False
         if command in {"/approve", "/run"}:
             self._approve_pending_plan()
@@ -375,6 +385,14 @@ class PlainNexusCLI:
             self.bridge.config.runtime_mode = value
             self.console.print(f"[green]runtime_mode={value}[/green]")
             return False
+        if command.startswith("/sudo "):
+            return self._handle_sudo_command(command)
+        if command == "/sudo":
+            return self._handle_sudo_command("/sudo status")
+        if command.startswith("/root "):
+            return self._handle_root_command(command)
+        if command == "/root":
+            return self._handle_root_command("/root status")
         if command.startswith("/remember "):
             text = prompt[len("/remember ") :].strip()
             if text:
@@ -407,6 +425,58 @@ class PlainNexusCLI:
 
     def _write_log(self, text: str) -> None:
         self.console.print(f"[dim][LOG][/dim] {text}")
+
+    def _handle_sudo_command(self, command: str) -> bool:
+        parts = command.split()
+        action = parts[1] if len(parts) > 1 else "status"
+        if action == "status":
+            self.console.print(f"[cyan]{self.bridge.actions.privilege_status().summary()}[/cyan]")
+            return False
+        if action == "off":
+            self.console.print(f"[yellow]{self.bridge.actions.disable_privilege_session(reason='manual')}[/yellow]")
+            return False
+        if action == "log":
+            if len(parts) < 3 or parts[2] not in {"on", "off"}:
+                self.console.print("[yellow]Use /sudo log on|off[/yellow]")
+                return False
+            enabled = self.bridge.actions.set_privilege_logging(parts[2] == "on")
+            self.console.print(f"[green]privilege_log={enabled}[/green]")
+            return False
+        if action != "on":
+            self.console.print("[yellow]Use /sudo status|on [timeout] [escopo]|off|log on|off[/yellow]")
+            return False
+        timeout_spec = parts[2] if len(parts) >= 3 else None
+        scope = parts[3] if len(parts) >= 4 else None
+        self.console.print("[cyan]Aprovacao sudo: digite a senha manualmente no prompt nativo do sudo.[/cyan]")
+        ok, message = self.bridge.actions.enable_sudo_session(timeout_spec, scope)
+        color = "green" if ok else "red"
+        self.console.print(f"[{color}]{message}[/{color}]")
+        return False
+
+    def _handle_root_command(self, command: str) -> bool:
+        parts = command.split()
+        action = parts[1] if len(parts) > 1 else "status"
+        if action == "status":
+            self.console.print(f"[cyan]{self.bridge.actions.privilege_status().summary()}[/cyan]")
+            return False
+        if action == "off":
+            self.console.print(f"[yellow]{self.bridge.actions.disable_privilege_session(reason='manual')}[/yellow]")
+            return False
+        if action == "confirm":
+            self.console.print("[cyan]Confirmacao root: digite a senha manualmente no prompt nativo do sudo.[/cyan]")
+            ok, message = self.bridge.actions.confirm_root_session()
+            color = "green" if ok else "red"
+            self.console.print(f"[{color}]{message}[/{color}]")
+            return False
+        if action != "on":
+            self.console.print("[yellow]Use /root on [timeout] [escopo]|confirm|off|status[/yellow]")
+            return False
+        timeout_spec = parts[2] if len(parts) >= 3 else None
+        scope = parts[3] if len(parts) >= 4 else None
+        ok, message = self.bridge.actions.request_root_session(timeout_spec, scope)
+        color = "yellow" if ok else "red"
+        self.console.print(f"[{color}]{message}[/{color}]")
+        return False
 
     def _load_history(self) -> list[dict[str, str]]:
         NexusPaths.ensure()
