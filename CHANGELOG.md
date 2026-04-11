@@ -26,6 +26,17 @@ O formato segue a ideia de:
 - Corrigido o CSS inválido da `NexusApp` que causava falha no parser do Textual.
 - Corrigido o mount da `NexusApp` ao aceitar `id=` em `GreenLightBar`.
 
+## [26.4.0] - 2026-04-11
+
+### Added
+- Blocos `Updated Plan`, eventos de pensamento/ação e resumo curto de saída logo abaixo de `Ran ...`.
+- Checagem de atualização em background com cache local e aviso para usar `nexus update` quando houver versão mais nova.
+- Testes para transcript estruturado e para o checker de atualização.
+
+### Changed
+- A UI visual e o modo plain ficaram mais próximos do estilo Codex/Claude Code ao mostrar progresso, plano e resultados.
+- O logger de execução agora resume `stdout` e `stderr` de comandos em vez de só sinalizar que o comando terminou.
+
 ## [26.3.1] - 2026-04-11
 
 ### Added

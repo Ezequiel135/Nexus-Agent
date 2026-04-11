@@ -298,7 +298,12 @@ class PlannerExecutor:
         needs_confirmation = False
 
         if tool_name == "executar_comando":
-            assessment = command_assessment(str(args.get("comando", "")))
+            assessment = command_assessment(
+                str(args.get("comando", "")),
+                extra_safe_executables={"apt", "apt-get", "cp", "dpkg", "flatpak", "journalctl", "mkdir", "mount", "mv", "snap", "systemctl", "tee", "timedatectl", "touch", "ufw", "umount"}
+                if args.get("elevated")
+                else None,
+            )
             risk_level = assessment.level
             risk_reason = assessment.reason
             needs_confirmation = assessment.needs_confirmation
@@ -327,6 +332,7 @@ class PlannerExecutor:
             {"role": "system", "content": system_prompt(self.config)},
             {"role": "user", "content": prompt},
         ]
+        self.actions.emit_transcript("thinking", text="Vou analisar a tarefa e montar um plano curto e seguro.")
         self.monitor.set_state("planning", detail="Gerando plano de execucao...")
         resp = self._completion(messages)
         text = _extract_json(self._message_content(resp.choices[0].message))
@@ -362,6 +368,7 @@ class PlannerExecutor:
         for step in plan:
             risk = step.get("risk_level", "green").upper()
             summary_lines.append(f"  Passo {step['step']}: {step['task']} [{risk}]")
+        self.actions.emit_transcript("updated_plan", title="Updated Plan", steps=plan)
         self.monitor.set_state("idle")
         return {
             "goal": goal,
@@ -386,6 +393,7 @@ class PlannerExecutor:
 
             self.monitor.set_state("acting", detail=f"Passo {index}/{total}: {task_desc}")
             self.monitor.set_step_progress(index, total, f"Executando: {task_desc}")
+            self.actions.emit_transcript("acting", text=f"Passo {index}/{total}: {task_desc}")
             result_text = ""
 
             if tool_name and tool_name != "null":
@@ -519,6 +527,7 @@ class LiteLLMBridge:
                 raise CancelledExecution("Execucao cancelada pelo usuario.")
 
             self.monitor.set_state("thinking", detail=f"Pensando... rodada {round_number}/{rounds}")
+            self.actions.emit_transcript("thinking", text=f"Rodada {round_number}/{rounds}: escolhendo a proxima acao.")
             response = self._completion(messages, tools=self.actions.tool_schemas())
             assistant_message = response.choices[0].message
             tool_calls = self._tool_calls(assistant_message)

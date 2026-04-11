@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from core.transcript import background_interaction, format_activity_log, format_duration, worked_banner
+from core.transcript import background_interaction, format_activity_log, format_duration, transcript_event, worked_banner
 
 
 class TranscriptTests(unittest.TestCase):
@@ -32,6 +32,32 @@ class TranscriptTests(unittest.TestCase):
 
         self.assertIn("↳ Interacted with background terminal", line)
         self.assertIn("└ sudo prompt aberto para senha manual", line)
+
+    def test_format_activity_log_for_updated_plan_event(self) -> None:
+        line = format_activity_log(
+            transcript_event(
+                "updated_plan",
+                title="Updated Plan",
+                steps=[{"step": 1, "task": "Abrir o app", "risk_level": "green"}],
+            )
+        )
+
+        self.assertIn("Updated Plan", line)
+        self.assertIn("1. Abrir o app [GREEN]", line)
+
+    def test_format_activity_log_for_update_notice(self) -> None:
+        line = format_activity_log(transcript_event("update_available", latest_version="26.4.0", command="nexus update"))
+
+        self.assertIn("Atualizacao disponivel: 26.4.0", line)
+        self.assertIn("`nexus update`", line)
+
+    def test_format_activity_log_for_command_result_event(self) -> None:
+        line = format_activity_log(
+            transcript_event("command_result", returncode=0, stdout_preview="janela aberta", stderr_preview="")
+        )
+
+        self.assertIn("exit 0", line)
+        self.assertIn("stdout: janela aberta", line)
 
 
 if __name__ == "__main__":

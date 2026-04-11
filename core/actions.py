@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import NexusConfig, NexusPaths
-from .logging_utils import log_event
+from .logging_utils import log_event, redact_sensitive_text
 from .mcp import call_mcp_tool, list_mcp_resources, list_mcp_servers, list_mcp_tools, read_mcp_resource
 from .memory import remember, search_memory
 from .privilege import PRIVILEGED_EXECUTABLES, PrivilegeSessionManager, parse_timeout_spec
@@ -24,6 +24,7 @@ from .safeguards import (
     parse_shell_command,
 )
 from .tool_registry import ToolRegistry
+from .transcript import transcript_event
 
 COMMAND_POLL_INTERVAL_SECONDS = 0.1
 DEFAULT_COMMAND_TIMEOUT_SECONDS = 120
@@ -52,6 +53,9 @@ class AcoesAgente(ToolRegistry):
     def _emit(self, text: str) -> None:
         if self._event_callback is not None:
             self._event_callback(text)
+
+    def emit_transcript(self, kind: str, **payload: Any) -> None:
+        self._emit(transcript_event(kind, **payload))
 
     def _cancelled(self) -> bool:
         return bool(self._cancel_event and self._cancel_event.is_set())
@@ -252,6 +256,16 @@ class AcoesAgente(ToolRegistry):
             payload.update(extra)
         return self._json(payload)
 
+    @staticmethod
+    def _preview_output(text: str, limit: int = 220) -> str:
+        sanitized = redact_sensitive_text((text or "").strip().replace("\r", " "))
+        if not sanitized:
+            return ""
+        compact = " ".join(sanitized.split())
+        if len(compact) <= limit:
+            return compact
+        return compact[: limit - 3].rstrip() + "..."
+
     def privilege_status(self):
         return self.privilege.status()
 
@@ -443,6 +457,12 @@ class AcoesAgente(ToolRegistry):
             metadata={"returncode": proc.returncode},
         )
         self._emit(line)
+        self.emit_transcript(
+            "command_result",
+            returncode=proc.returncode,
+            stdout_preview=self._preview_output(payload["stdout"]),
+            stderr_preview=self._preview_output(payload["stderr"]),
+        )
         return self._json(payload)
 
     def gerenciar_arquivos(

@@ -40,7 +40,8 @@ from core.logging_utils import log_event
 from core.memory import clear_memory, memory_summary, remember
 from core.state import ActivityMonitor, LIGHT_COLORS, LIGHT_SYMBOLS
 from core.safeguards import blocked_examples, blocked_reasons
-from core.transcript import background_interaction, bullet, format_activity_log, worked_banner
+from core.transcript import background_interaction, bullet, format_activity_log, transcript_event, worked_banner
+from core.update_check import DEFAULT_UPDATE_COMMAND, UpdateInfo, check_for_update, installed_repo_url
 from core.version import APP_VERSION
 
 
@@ -665,6 +666,7 @@ class NexusApp(App[None]):
         self._loading_frame = 0
         self._loading_base = "Carregando modulos, contexto e sessao"
         self.task_started_at: float | None = None
+        self.update_info: UpdateInfo | None = None
 
     def compose(self) -> ComposeResult:
         yield GreenLightBar(id="light-bar")
@@ -759,6 +761,7 @@ class NexusApp(App[None]):
             self._write_log(f"Remote bots: {len(self.bridge.config.remote_integrations)} integracao(oes) | {state}")
         self._write_log(f"Notebook root: {NexusPaths.notebooks_dir}")
         self._write_log("Auto plan, dry-run e cancelamento por Esc habilitados. Execucao paralela disponivel via CLI.")
+        self._start_update_check()
         if self.initial_task:
             self.launcher_visible = False
             self.query_one("#startup-overlay", Container).display = False
@@ -936,6 +939,7 @@ class NexusApp(App[None]):
                         f"- dry_run={self.bridge.config.dry_run}",
                         f"- plan_before_execute={self.bridge.config.plan_before_execute}",
                         f"- privilege={self.bridge.actions.privilege_status().summary()}",
+                        f"- update={(self.update_info.message if self.update_info else 'checando...')}",
                         f"- model={snap.current_model}",
                         f"- detail={snap.detail or '-'}",
                     ]
@@ -955,6 +959,7 @@ class NexusApp(App[None]):
                         f"- max_tool_rounds={self.bridge.config.max_tool_rounds}",
                         f"- max_output_tokens={self.bridge.config.max_output_tokens}",
                         f"- privilege={self.bridge.actions.privilege_status().summary()}",
+                        f"- update_message={(self.update_info.message if self.update_info else 'checando...')}",
                     ]
                 )
             )
@@ -1076,6 +1081,22 @@ class NexusApp(App[None]):
         except Exception:
             return callback()
 
+    def _start_update_check(self) -> None:
+        threading.Thread(target=self._check_for_update, daemon=True).start()
+
+    def _check_for_update(self) -> None:
+        info = check_for_update(APP_VERSION, installed_repo_url())
+        self.update_info = info
+        if info.update_available:
+            self.call_from_thread(
+                self._write_log,
+                transcript_event(
+                    "update_available",
+                    latest_version=info.latest_version,
+                    command=DEFAULT_UPDATE_COMMAND,
+                ),
+            )
+
     def _handle_sudo_command(self, command: str) -> None:
         parts = command.split()
         action = parts[1] if len(parts) > 1 else "status"
@@ -1137,14 +1158,10 @@ class NexusApp(App[None]):
             self.conversation.append({"role": "user", "content": prompt})
             self._save_history()
             self._set_mission_panel("Execucao direta em andamento...")
-            answer, tool_logs = self.bridge.chat(self.conversation)
+            answer, _tool_logs = self.bridge.chat(self.conversation)
             self.conversation.append({"role": "assistant", "content": answer})
             self._save_history()
             self.call_from_thread(self._write_chat, answer)
-            for item in tool_logs:
-                self.call_from_thread(self._write_log, item)
-            if not tool_logs:
-                self.call_from_thread(self._write_log, "Nenhuma ferramenta local usada.")
             self.call_from_thread(self._set_mission_panel, "Execucao direta concluida.")
             self.call_from_thread(self._finish_task_log, "Execucao direta concluida.")
         except CancelledExecution as exc:

@@ -24,7 +24,8 @@ from core.memory import clear_memory, memory_summary, remember
 from core.notebooks import list_notebooks
 from core.safeguards import blocked_examples, blocked_reasons
 from core.state import ActivityMonitor
-from core.transcript import background_interaction, bullet, format_activity_log, worked_banner
+from core.transcript import background_interaction, bullet, format_activity_log, transcript_event, worked_banner
+from core.update_check import DEFAULT_UPDATE_COMMAND, UpdateInfo, check_for_update, installed_repo_url
 from core.version import APP_VERSION
 
 
@@ -78,6 +79,7 @@ class PlainNexusCLI:
         self.pending_plan: dict[str, object] | None = None
         self.cancel_event = threading.Event()
         self.task_started_at: float | None = None
+        self.update_info: UpdateInfo | None = None
         self.bridge.actions.set_event_callback(self._write_log)
         self.bridge.actions.set_cancel_event(self.cancel_event)
 
@@ -89,6 +91,7 @@ class PlainNexusCLI:
         if self.first_run:
             self._render_onboarding_panel(first_run=True)
         self._write_log(message)
+        self._start_update_check()
         self.console.print("[bold green]NEXUS AGENT online[/bold green]" if ok else f"[bold red]{message}[/bold red]")
         if self.initial_task:
             self._handle_prompt(self.initial_task)
@@ -253,7 +256,8 @@ class PlainNexusCLI:
                     f"mcp={len(self.bridge.config.mcp_servers)}\n"
                     f"notebooks_dir={NexusPaths.notebooks_dir}\n"
                     f"remote={len(self.bridge.config.remote_integrations)} armed={self.bridge.config.remote_armed}\n"
-                    f"privilegio={self.bridge.actions.privilege_status().summary()}",
+                    f"privilegio={self.bridge.actions.privilege_status().summary()}\n"
+                    f"update={(self.update_info.latest_version if self.update_info and self.update_info.update_available else 'ok')}",
                     title="Status",
                     border_style="yellow",
                 )
@@ -358,7 +362,8 @@ class PlainNexusCLI:
                     f"plan_before_execute={self.bridge.config.plan_before_execute}\n"
                     f"cache={self.bridge.config.llm_cache_enabled}\n"
                     f"max_tool_rounds={self.bridge.config.max_tool_rounds}\n"
-                    f"privilege={self.bridge.actions.privilege_status().summary()}",
+                    f"privilege={self.bridge.actions.privilege_status().summary()}\n"
+                    f"update_message={(self.update_info.message if self.update_info else 'checando...')}",
                     title="Settings",
                     border_style="bright_blue",
                 )
@@ -452,6 +457,21 @@ class PlainNexusCLI:
         self.console.print(worked_banner(time.monotonic() - started_at))
         self.console.print("")
         self.console.print(bullet(message))
+
+    def _start_update_check(self) -> None:
+        threading.Thread(target=self._check_for_update, daemon=True).start()
+
+    def _check_for_update(self) -> None:
+        info = check_for_update(APP_VERSION, installed_repo_url())
+        self.update_info = info
+        if info.update_available:
+            self._write_log(
+                transcript_event(
+                    "update_available",
+                    latest_version=info.latest_version,
+                    command=DEFAULT_UPDATE_COMMAND,
+                )
+            )
 
     def _handle_sudo_command(self, command: str) -> bool:
         parts = command.split()

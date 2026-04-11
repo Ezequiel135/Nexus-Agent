@@ -256,6 +256,7 @@ class NexusPaths:
     repo_path = base_dir / "repo.txt"
     memory_path = base_dir / "memory.json"
     llm_cache_path = base_dir / "llm_cache.json"
+    update_check_path = base_dir / "update_check.json"
 
     @classmethod
     def ensure(cls) -> None:
