@@ -34,6 +34,23 @@ class FakeBridge:
             "summary": f"Plano gerado por {agent.name}",
         }
 
+    def preview_plan(self, goal):
+        agent = self.config.active_agent
+        return {
+            "goal": goal,
+            "plan_steps": 1,
+            "steps": [
+                {
+                    "step": 1,
+                    "task": f"Planejar como {agent.name}",
+                    "tool": None,
+                    "args": {},
+                    "result": "OK",
+                }
+            ],
+            "summary": f"Plano gerado por {agent.name}",
+        }
+
 
 def make_config():
     account_a = make_account("Conta A", "OpenAI", "key-a", "gpt-4o-mini")

@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import unittest
 
-from core.version import bump_bugfix, bump_feature, initial_version_for_year, parse_calver
+from core.version import APP_VERSION, bump_bugfix, bump_feature, initial_version_for_year, parse_calver
 
 
 class VersionTests(unittest.TestCase):
+    def test_app_version_matches_release(self) -> None:
+        self.assertEqual(APP_VERSION, "26.2.0")
+
     def test_initial_version_for_year(self) -> None:
         self.assertEqual(initial_version_for_year(2026), "26.1.0")
 

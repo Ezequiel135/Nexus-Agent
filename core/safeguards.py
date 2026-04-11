@@ -2,121 +2,284 @@ from __future__ import annotations
 
 import os
 import re
+import shlex
+from dataclasses import dataclass, field
+from pathlib import Path
+from urllib.parse import urlparse
 
 
-LIGHT_GREEN = "🟢 LUZ VERDE — comando classificado como SEGURO"
-LIGHT_YELLOW = "🟡 Atencao — comando modifica o sistema (ex: instalar, remover)"
-LIGHT_RED = "🔴 BLOQUEADO — risco de dano ou operacao destrutiva"
+LIGHT_GREEN = "LUZ VERDE — comando permitido"
+LIGHT_YELLOW = "LUZ AMARELA — requer revisao/confirmacao"
+LIGHT_RED = "LUZ VERMELHA — comando bloqueado"
 
+SHELL_META_RE = re.compile(r"[;&|`]|(\$\()|[<>]|\n")
+PATH_LIKE_RE = re.compile(r"^[./~]|^[A-Za-z]:[\\/]|/")
 
 BLOCKED_RULES = [
-    # Destruicao total
-    (re.compile(r"\brm\s+-rf\s+/($|\s)"), "Remocao total da raiz"),
-    (re.compile(r"\brm\s+-rf\s+--no-preserve-root\b"), "Tentativa de apagar a raiz"),
-    (re.compile(r"\bmv\s+.+\s+/dev/null\b"), "Descarte destrutivo de arquivos"),
+    (re.compile(r"\brm\s+-rf\b"), "Remocao recursiva forcada bloqueada"),
     (re.compile(r"\bmkfs(\.\w+)?\b"), "Formatacao de disco bloqueada"),
+    (re.compile(r"\bdd\b.*\bof=/dev/"), "Gravacao direta em device bloqueada"),
     (re.compile(r"\b(fdisk|parted|cfdisk|sfdisk)\b"), "Manipulacao de particao bloqueada"),
-    (re.compile(r"\bdd\s+.+\bof=/dev/"), "Gravacao direta em device bloqueada"),
     (re.compile(r"\b(wipefs|shred)\b"), "Apagamento irreversivel bloqueado"),
-    # Alteracoes massivas na raiz
-    (re.compile(r"\b(chmod|chown)\s+-r\s+/"), "Alteracao massiva na raiz bloqueada"),
-    (re.compile(r"\bchmod\s+777\s+/"), "Permissao perigosa na raiz bloqueada"),
-    # Energia / firmware
-    (re.compile(r"\b(systemctl\s+(poweroff|reboot|halt))\b"), "Comando de desligamento bloqueado"),
     (re.compile(r"\b(shutdown|reboot|poweroff|halt|init 0|init 6)\b"), "Comando de energia bloqueado"),
-    (re.compile(r"\bmount\b.+\s-o\s+remount,rw\s+/"), "Remount sensivel da raiz bloqueado"),
-    (re.compile(r"\b(flashrom|efibootmgr)\b"), "Comando de firmware bloqueado"),
+    (re.compile(r"\bchmod\s+-r\b"), "chmod -R bloqueado"),
+    (re.compile(r"\bchown\s+-r\b"), "chown -R bloqueado"),
+    (re.compile(r"\bformat\b"), "Formatacao bloqueada"),
 ]
 
-DANGEROUS_PATTERNS = [
-    re.compile(r"^\s*rm\s+.*-rf\b"),
-    re.compile(r"^\s*dd\s+.*of=/dev/"),
-    re.compile(r"^\s*(shutdown|reboot|poweroff|halt)\b"),
-    re.compile(r"^\s*mkfs\b"),
-    re.compile(r"^\s*fdisk\b"),
-    re.compile(r"^\s*rm\s+.*/\*"),
-    re.compile(r"^\s*rm\s+~"),  # apagar home inteiro
-]
-
-
-EXEMPT_DIRS = {
-    os.path.expanduser("~"),
-    os.path.expanduser("~/.nexus"),
-    "/tmp",
-    "/var/tmp",
-    os.getcwd(),
+SAFE_EXECUTABLES = {
+    "awk",
+    "cat",
+    "cp",
+    "date",
+    "df",
+    "du",
+    "echo",
+    "env",
+    "file",
+    "find",
+    "git",
+    "grep",
+    "head",
+    "hostname",
+    "ls",
+    "mkdir",
+    "mv",
+    "pip",
+    "pip3",
+    "pwd",
+    "pytest",
+    "python",
+    "python3",
+    "rg",
+    "sed",
+    "stat",
+    "tail",
+    "tar",
+    "touch",
+    "uname",
+    "unzip",
+    "uv",
+    "wc",
+    "which",
+    "whoami",
+    "zip",
 }
 
-ALLOWED_SUDO_COMMANDS = {
-    "apt-get update",
-    "apt-get install",
-    "systemctl --user",
-    "pip3 install",
+CONFIRMATION_EXECUTABLES = {
+    "cp",
+    "git",
+    "mkdir",
+    "mv",
+    "pip",
+    "pip3",
+    "python",
+    "python3",
+    "sed",
+    "tar",
+    "touch",
+    "uv",
 }
+
+CRITICAL_PATH_PREFIXES = (
+    "/",
+    "/bin",
+    "/boot",
+    "/dev",
+    "/etc",
+    "/lib",
+    "/lib64",
+    "/proc",
+    "/root",
+    "/run",
+    "/sbin",
+    "/sys",
+    "/usr",
+)
+
+
+@dataclass(slots=True)
+class CommandAssessment:
+    allowed: bool
+    level: str
+    reason: str
+    needs_confirmation: bool = False
+    executable: str = ""
+    argv: list[str] = field(default_factory=list)
+    modifies_state: bool = False
+
+
+def allowed_write_roots() -> tuple[Path, ...]:
+    cwd = Path.cwd().resolve()
+    return (
+        Path.home().resolve(),
+        cwd,
+        (Path.home() / ".nexus").resolve(),
+        Path("/tmp").resolve(),
+        Path("/var/tmp").resolve(),
+    )
+
+
+def normalize_user_path(value: str) -> Path:
+    raw = (value or "").strip()
+    if not raw or "\x00" in raw:
+        raise ValueError("Path invalido.")
+    return Path(raw).expanduser()
+
+
+def is_critical_system_path(path: Path) -> bool:
+    try:
+        resolved = path.resolve(strict=False)
+    except OSError:
+        resolved = path
+    resolved_str = str(resolved)
+    return any(resolved_str == prefix or resolved_str.startswith(prefix + os.sep) for prefix in CRITICAL_PATH_PREFIXES)
+
+
+def is_path_within_allowed_roots(path: Path) -> bool:
+    try:
+        resolved = path.resolve(strict=False)
+    except OSError:
+        resolved = path
+    return any(str(resolved).startswith(str(root)) for root in allowed_write_roots())
+
+
+def ensure_safe_write_path(value: str) -> Path:
+    path = normalize_user_path(value)
+    if is_critical_system_path(path):
+        raise ValueError(f"Path sensivel bloqueado: {path}")
+    if not is_path_within_allowed_roots(path):
+        raise ValueError(f"Path fora das areas permitidas: {path}")
+    return path
+
+
+def sanitize_url(value: str) -> str:
+    raw = (value or "").strip()
+    if not raw:
+        raise ValueError("URL vazia.")
+    parsed = urlparse(raw)
+    if parsed.scheme not in {"http", "https"}:
+        raise ValueError("URL deve usar http ou https.")
+    if parsed.username or parsed.password:
+        raise ValueError("URL com credenciais embutidas nao e permitida.")
+    if not parsed.netloc:
+        raise ValueError("URL invalida.")
+    return raw
+
+
+def parse_shell_command(command: str) -> list[str]:
+    raw = (command or "").strip()
+    if not raw:
+        raise ValueError("Comando vazio.")
+    if SHELL_META_RE.search(raw):
+        raise ValueError("Operadores de shell complexos foram bloqueados por seguranca.")
+    try:
+        argv = shlex.split(raw, posix=True)
+    except ValueError as exc:
+        raise ValueError(f"Comando invalido: {exc}") from exc
+    if not argv:
+        raise ValueError("Comando vazio.")
+    return argv
+
+
+def command_assessment(command: str) -> CommandAssessment:
+    raw = (command or "").strip()
+    lowered = raw.lower()
+
+    for pattern, reason in BLOCKED_RULES:
+        if pattern.search(lowered):
+            return CommandAssessment(False, "red", reason)
+
+    try:
+        argv = parse_shell_command(raw)
+    except ValueError as exc:
+        return CommandAssessment(False, "red", str(exc))
+
+    executable = argv[0].lower()
+    if executable not in SAFE_EXECUTABLES:
+        return CommandAssessment(False, "red", f"Executavel fora da whitelist: {executable}", executable=executable, argv=argv)
+
+    modifies_state = executable in CONFIRMATION_EXECUTABLES
+
+    if executable == "git":
+        modifies_state = any(
+            token in {"add", "commit", "push", "pull", "checkout", "switch", "merge", "rebase", "clone", "restore"}
+            for token in argv[1:]
+        )
+        if "push" in argv[1:]:
+            return CommandAssessment(False, "red", "git push via agente shell foi bloqueado; use fluxo explicito de publicacao.", executable=executable, argv=argv, modifies_state=True)
+
+    if executable in {"python", "python3"}:
+        if any(token in {"-c", "-m"} for token in argv[1:3]):
+            modifies_state = True
+
+    for token in argv[1:]:
+        if token.startswith("-"):
+            continue
+        if not PATH_LIKE_RE.search(token):
+            continue
+        try:
+            candidate = normalize_user_path(token)
+        except ValueError:
+            return CommandAssessment(False, "red", f"Path invalido no comando: {token}", executable=executable, argv=argv)
+        if modifies_state:
+            if is_critical_system_path(candidate):
+                return CommandAssessment(False, "red", f"Path sensivel bloqueado: {candidate}", executable=executable, argv=argv, modifies_state=True)
+            if not is_path_within_allowed_roots(candidate):
+                return CommandAssessment(False, "red", f"Path fora das areas permitidas: {candidate}", executable=executable, argv=argv, modifies_state=True)
+
+    if modifies_state:
+        return CommandAssessment(
+            True,
+            "yellow",
+            "Comando com potencial de modificar arquivos/ambiente.",
+            needs_confirmation=True,
+            executable=executable,
+            argv=argv,
+            modifies_state=True,
+        )
+
+    return CommandAssessment(True, "green", "Comando permitido.", executable=executable, argv=argv)
 
 
 def is_destructive_command(command: str) -> bool:
-    cmd = command.strip()
-    for pattern in BLOCKED_RULES:
-        if pattern[0].search(cmd):
-            return True
-    return False
+    assessment = command_assessment(command)
+    return assessment.level == "red"
 
 
 def command_is_safe(command: str) -> tuple[bool, str]:
-    cmd = " ".join(command.strip().lower().split())
-
-    # Regras explicitas
-    for pattern, reason in BLOCKED_RULES:
-        if pattern.search(cmd):
-            return False, f"Luz Vermelha: {reason}"
-
-    # rm -rf fora de diretorios permitidos
-    rm_match = re.match(r"^rm\s+.*-rf\b", cmd)
-    if rm_match:
-        removed_paths = re.findall(r"rm\s+-rf\s+([^\s]+)", cmd)
-        for p in removed_paths:
-            expanded = os.path.expanduser(p)
-            if expanded != "/" and not any(expanded.startswith(d) for d in EXEMPT_DIRS):
-                return False, "Luz Vermelha: remocao em massa fora de diretorios seguros"
-
-    # Verifica se esta em um diretorio seguro
-    cwd = os.getcwd()
-    if not any(cwd.startswith(d) for d in EXEMPT_DIRS):
-        return False, f"Luz Amarela: diretorio atual {cwd} fora de zonas seguras"
-
-    # Comandos que pedem confirmacao visual
-    dangerous_keywords = ["rm -r", "dd", "mkfs", "fdisk", "shred", "format"]
-    if any(kw in cmd for kw in dangerous_keywords):
-        return False, "Luz Amarela: comando potencialmente destrutivo — precisa confirmacao"
-
-    return True, ""
+    assessment = command_assessment(command)
+    if assessment.level == "green":
+        return True, ""
+    prefix = "Luz Vermelha" if assessment.level == "red" else "Luz Amarela"
+    return False, f"{prefix}: {assessment.reason}"
 
 
 def assess_command_light(command: str) -> str:
-    """Retorna o estado da Luz Verde para um comando."""
-    allowed, reason = command_is_safe(command)
-    if allowed:
+    assessment = command_assessment(command)
+    if assessment.level == "green":
         return LIGHT_GREEN
-    if "Luz Vermelha" in reason:
-        return f"{LIGHT_RED} — {reason}"
-    return f"{LIGHT_YELLOW} — {reason}"
+    if assessment.level == "yellow":
+        return f"{LIGHT_YELLOW} — {assessment.reason}"
+    return f"{LIGHT_RED} — {assessment.reason}"
 
 
 def blocked_reasons() -> list[str]:
-    return [r for _, r in BLOCKED_RULES]
+    reasons = [reason for _, reason in BLOCKED_RULES]
+    reasons.append("Executaveis fora da whitelist padrao sao bloqueados.")
+    reasons.append("Operadores complexos de shell (;, &&, ||, |, >, <, $()) sao bloqueados.")
+    reasons.append("Escritas fora de HOME/cwd/.nexus/tmp sao bloqueadas.")
+    return reasons
 
 
 def blocked_examples() -> list[str]:
     return [
         "rm -rf /",
-        "rm -rf --no-preserve-root /",
+        "rm -rf ~/Downloads",
         "mkfs.ext4 /dev/sda1",
-        "fdisk /dev/sda",
         "dd if=image.iso of=/dev/sda",
-        "wipefs -a /dev/sda",
-        "shred -v /dev/sdb",
         "chmod -R 777 /",
         "shutdown now",
-        "mkfs.vfat /dev/sda1",
+        "bash -lc 'rm -rf /tmp/x'",
+        "git push origin main",
     ]

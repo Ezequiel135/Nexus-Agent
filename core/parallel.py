@@ -104,8 +104,13 @@ class ParallelAgentRunner:
             bridge = self._bridge_factory(agent_config, monitor)
 
             if mode == "plan":
-                execution = bridge.chat_with_plan(task)
-                steps = execution.get("results", [])
+                if hasattr(bridge, "preview_plan"):
+                    execution = bridge.preview_plan(task)
+                else:
+                    execution = bridge.chat_with_plan(task)
+                steps = execution.get("steps", [])
+                if not steps:
+                    steps = execution.get("results", [])
                 tool_logs = [
                     f"{step.get('tool')}({json.dumps(step.get('args', {}), ensure_ascii=False)})"
                     for step in steps

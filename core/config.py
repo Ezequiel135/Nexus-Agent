@@ -5,11 +5,13 @@ import json
 import os
 import re
 import secrets
+from urllib.parse import urlparse
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 KNOWN_PROVIDERS = ("OpenAI", "Anthropic", "Google", "Ollama", "Groq", "Custom")
 KNOWN_REMOTE_CHANNELS = ("telegram", "whatsapp")
+KNOWN_RUNTIME_MODES = ("online", "hybrid", "offline")
 RUNTIME_ENV_KEYS = (
     "OPENAI_API_KEY",
     "OPENAI_BASE_URL",
@@ -22,6 +24,7 @@ RUNTIME_ENV_KEYS = (
     "NEXUS_ACCOUNT_NAME",
     "NEXUS_AGENT_NAME",
     "NEXUS_CUSTOM_PROVIDER",
+    "NEXUS_RUNTIME_MODE",
 )
 
 
@@ -44,6 +47,11 @@ class NexusAccount:
     @property
     def is_custom(self) -> bool:
         return normalize_provider(self.provider) == "Custom"
+
+    @property
+    def is_local_runtime(self) -> bool:
+        provider = normalize_provider(self.provider)
+        return provider == "Ollama" or is_loopback_url(self.base_url)
 
     def completion_kwargs(self) -> dict[str, str]:
         kwargs: dict[str, str] = {}
@@ -88,6 +96,16 @@ class NexusConfig:
     password_hash: str
     password_salt: str
     ui_mode: str = "auto"
+    runtime_mode: str = "hybrid"
+    plan_before_execute: bool = True
+    dry_run: bool = True
+    startup_probe: bool = False
+    llm_cache_enabled: bool = True
+    max_tool_rounds: int = 6
+    max_plan_steps: int = 8
+    max_history_messages: int = 24
+    max_memory_items: int = 6
+    max_output_tokens: int = 1200
     accounts: list[NexusAccount] = field(default_factory=list)
     active_account_id: str = ""
     agents: list[NexusAgentProfile] = field(default_factory=list)
@@ -147,6 +165,7 @@ class NexusConfig:
         agent = self.active_agent
         model = self.model_name or "-"
         extras = []
+        extras.append(f"modo={self.runtime_mode}")
         if account:
             extras.append(account.name)
         if agent:
@@ -155,10 +174,32 @@ class NexusConfig:
             return f"{model} | {' | '.join(extras)}"
         return model
 
+    @property
+    def llm_allowed(self) -> bool:
+        account = self.active_account
+        if account is None:
+            return False
+        if self.runtime_mode == "offline" and not account.is_local_runtime:
+            return False
+        return bool(account.model_name)
+
+    @property
+    def local_llm_enabled(self) -> bool:
+        account = self.active_account
+        return bool(account and account.is_local_runtime and account.model_name)
+
+    @property
+    def supports_offline_commands(self) -> bool:
+        return True
+
     def completion_kwargs(self) -> dict[str, str]:
         account = self.active_account
         if account is None:
             raise RuntimeError("Nenhuma conta ativa. Rode nexus login ou nexus setup.")
+        if self.runtime_mode == "offline" and not account.is_local_runtime:
+            raise RuntimeError(
+                "Modo offline ativo sem provedor local configurado. Use Ollama/localhost ou mude para runtime online/hybrid."
+            )
         return account.completion_kwargs()
 
     def export_runtime_env(self) -> None:
@@ -194,6 +235,7 @@ class NexusConfig:
 
         os.environ["NEXUS_MODEL_NAME"] = account.model_name
         os.environ["NEXUS_PROVIDER"] = account.provider_label
+        os.environ["NEXUS_RUNTIME_MODE"] = self.runtime_mode
         os.environ["NEXUS_ACCOUNT_NAME"] = account.name
         if self.active_agent is not None:
             os.environ["NEXUS_AGENT_NAME"] = self.active_agent.name
@@ -203,17 +245,21 @@ class NexusPaths:
     base_dir = Path(os.environ["NEXUS_HOME"]).expanduser() if os.environ.get("NEXUS_HOME") else Path.home() / ".nexus"
     config_path = base_dir / "config.json"
     log_path = base_dir / "nexus.log"
+    audit_path = base_dir / "audit.jsonl"
     trash_dir = base_dir / "trash"
+    backups_dir = base_dir / "backups"
     notebooks_dir = base_dir / "notebooks"
     history_path = base_dir / "history.json"
     activity_path = base_dir / "activity.json"
     repo_path = base_dir / "repo.txt"
     memory_path = base_dir / "memory.json"
+    llm_cache_path = base_dir / "llm_cache.json"
 
     @classmethod
     def ensure(cls) -> None:
         cls.base_dir.mkdir(parents=True, exist_ok=True)
         cls.trash_dir.mkdir(parents=True, exist_ok=True)
+        cls.backups_dir.mkdir(parents=True, exist_ok=True)
         cls.notebooks_dir.mkdir(parents=True, exist_ok=True)
         os.chmod(cls.base_dir, 0o700)
 
@@ -238,6 +284,13 @@ def normalize_ui_mode(value: str | None) -> str:
     return "auto"
 
 
+def normalize_runtime_mode(value: str | None) -> str:
+    normalized = (value or "").strip().lower()
+    if normalized in KNOWN_RUNTIME_MODES:
+        return normalized
+    return "hybrid"
+
+
 def normalize_provider(value: str | None) -> str:
     raw = (value or "").strip()
     if not raw:
@@ -257,6 +310,26 @@ def normalize_remote_channel(value: str | None) -> str:
 
 def sanitize_base_url(value: str | None) -> str:
     return (value or "").strip().rstrip("/")
+
+
+def is_loopback_url(value: str | None) -> bool:
+    raw = sanitize_base_url(value)
+    if not raw:
+        return False
+    try:
+        host = (urlparse(raw).hostname or "").lower()
+    except ValueError:
+        return False
+    return host in {"127.0.0.1", "localhost", "::1"}
+
+
+def provider_requires_api_key(provider: str, base_url: str = "", runtime_mode: str = "hybrid") -> bool:
+    normalized = normalize_provider(provider)
+    if normalized == "Ollama":
+        return False
+    if normalize_runtime_mode(runtime_mode) == "offline" and is_loopback_url(base_url):
+        return False
+    return True
 
 
 def slugify_name(value: str, fallback: str) -> str:
@@ -341,11 +414,13 @@ def build_initial_config(
     ui_mode: str,
     account: NexusAccount,
     agent: NexusAgentProfile,
+    runtime_mode: str = "hybrid",
 ) -> NexusConfig:
     return NexusConfig(
         password_hash=password_hash,
         password_salt=password_salt,
         ui_mode=normalize_ui_mode(ui_mode),
+        runtime_mode=normalize_runtime_mode(runtime_mode),
         accounts=[account],
         active_account_id=account.id,
         agents=[agent],
@@ -467,6 +542,16 @@ def logout_account(config: NexusConfig) -> None:
 
 def normalize_config(config: NexusConfig) -> NexusConfig:
     config.ui_mode = normalize_ui_mode(config.ui_mode)
+    config.runtime_mode = normalize_runtime_mode(config.runtime_mode)
+    config.max_tool_rounds = max(1, int(config.max_tool_rounds or 6))
+    config.max_plan_steps = max(1, int(config.max_plan_steps or 8))
+    config.max_history_messages = max(4, int(config.max_history_messages or 24))
+    config.max_memory_items = max(1, int(config.max_memory_items or 6))
+    config.max_output_tokens = max(128, int(config.max_output_tokens or 1200))
+    config.plan_before_execute = bool(config.plan_before_execute)
+    config.dry_run = bool(config.dry_run)
+    config.startup_probe = bool(config.startup_probe)
+    config.llm_cache_enabled = bool(config.llm_cache_enabled)
     for account in config.accounts:
         account.provider = normalize_provider(account.provider)
         account.base_url = sanitize_base_url(account.base_url)
@@ -528,6 +613,7 @@ def _load_legacy_config(payload: dict) -> NexusConfig:
         ui_mode=payload.get("ui_mode", "auto"),
         account=account,
         agent=agent,
+        runtime_mode=payload.get("runtime_mode", "hybrid"),
     )
     return normalize_config(config)
 
@@ -542,6 +628,16 @@ def load_config() -> NexusConfig:
         password_hash=payload["password_hash"],
         password_salt=payload["password_salt"],
         ui_mode=payload.get("ui_mode", "auto"),
+        runtime_mode=payload.get("runtime_mode", "hybrid"),
+        plan_before_execute=payload.get("plan_before_execute", True),
+        dry_run=payload.get("dry_run", True),
+        startup_probe=payload.get("startup_probe", False),
+        llm_cache_enabled=payload.get("llm_cache_enabled", True),
+        max_tool_rounds=payload.get("max_tool_rounds", 6),
+        max_plan_steps=payload.get("max_plan_steps", 8),
+        max_history_messages=payload.get("max_history_messages", 24),
+        max_memory_items=payload.get("max_memory_items", 6),
+        max_output_tokens=payload.get("max_output_tokens", 1200),
         accounts=[NexusAccount(**item) for item in payload.get("accounts", [])],
         active_account_id=payload.get("active_account_id", ""),
         agents=[NexusAgentProfile(**item) for item in payload.get("agents", [])],

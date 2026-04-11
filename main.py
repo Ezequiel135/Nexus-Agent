@@ -31,6 +31,7 @@ from core.config import (
     logout_account,
     make_remote_integration,
     normalize_ui_mode,
+    normalize_runtime_mode,
     remove_mcp_server,
     remove_remote_integration,
     save_config,
@@ -105,6 +106,7 @@ def build_parser() -> argparse.ArgumentParser:
     start.add_argument("--task", help="Executa uma tarefa inicial ao abrir a interface")
     start.add_argument("--plain", action="store_true", help="Usa modo terminal puro, estilo REPL")
     start.add_argument("--onboarding", action="store_true", help="Abre a sessao com um guia inicial de uso")
+    start.add_argument("--runtime-mode", choices=["online", "hybrid", "offline"], help="Sobrescreve o runtime da sessao atual")
 
     sub.add_parser("blocked", help="Mostra os comandos e areas bloqueadas por seguranca")
     sub.add_parser("doctor", help="Mostra diagnostico do terminal e da plataforma")
@@ -223,6 +225,7 @@ def handle_doctor() -> int:
     if config is not None:
         active_account = config.active_account.name if config.active_account else "-"
         active_agent = config.active_agent.name if config.active_agent else "-"
+        print(f"runtime_mode={config.runtime_mode} dry_run={config.dry_run} plan_before_execute={config.plan_before_execute}")
         print(f"accounts={len(config.accounts)} active_account={active_account}")
         print(f"agents={len(config.agents)} active_agent={active_agent}")
         print(f"mcp_servers={len(config.mcp_servers)}")
@@ -682,15 +685,14 @@ def should_use_plain_mode(force_plain: bool, config=None) -> bool:
     return nexus_app is None
 
 
-def handle_start(task: str | None, plain: bool = False) -> int:
+def handle_start(task: str | None, plain: bool = False, runtime_mode: str | None = None) -> int:
     fresh_setup = ensure_config()
     if not config_exists():
         print("Configuracao inicial nao concluida. Rode nexus setup e finalize o formulario.")
         return 1
     config = load_config()
-    if config.active_account is None:
-        print("Nenhuma conta ativa. Rode nexus login para entrar em uma conta ou nexus setup para reconfigurar.")
-        return 1
+    if runtime_mode:
+        config.runtime_mode = normalize_runtime_mode(runtime_mode)
     initial_task = resolve_initial_task(task, fresh_setup=fresh_setup)
     use_plain_mode = should_use_plain_mode(plain, config)
     monitor = ActivityMonitor()
@@ -795,7 +797,7 @@ def main(argv: list[str] | None = None) -> int:
         return handle_uninstall()
     if args.command == "start":
         requested_task = build_onboarding_task(first_run=False) if args.onboarding else args.task
-        return handle_start(requested_task, plain=args.plain)
+        return handle_start(requested_task, plain=args.plain, runtime_mode=args.runtime_mode)
     return 0
 
 

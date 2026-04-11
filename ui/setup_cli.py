@@ -20,7 +20,9 @@ from core.config import (
     make_account,
     make_agent,
     normalize_provider,
+    normalize_runtime_mode,
     normalize_ui_mode,
+    provider_requires_api_key,
     save_config,
 )
 
@@ -48,6 +50,7 @@ def build_setup_config_from_env() -> NexusConfig:
     ui_mode = normalize_ui_mode(os.environ.get("NEXUS_UI_MODE"))
     if ui_mode == "auto":
         ui_mode = "visual"
+    runtime_mode = normalize_runtime_mode(os.environ.get("NEXUS_RUNTIME_MODE"))
 
     password = os.environ.get("NEXUS_PASSWORD", "").strip()
     account_name = os.environ.get("NEXUS_ACCOUNT_NAME", "").strip() or "Conta principal"
@@ -59,12 +62,13 @@ def build_setup_config_from_env() -> NexusConfig:
     base_url = os.environ.get("NEXUS_BASE_URL", "").strip()
     custom_provider = os.environ.get("NEXUS_CUSTOM_PROVIDER", "").strip()
 
-    validate_account_inputs(provider, api_key, model_name, base_url)
+    validate_account_inputs(provider, api_key, model_name, base_url, runtime_mode)
     if not password:
         raise SystemExit(
             "Setup interativo indisponivel sem TTY. "
             "Defina NEXUS_PASSWORD, NEXUS_PROVIDER, NEXUS_API_KEY, NEXUS_MODEL_NAME e opcionalmente "
-            "NEXUS_ACCOUNT_NAME, NEXUS_AGENT_NAME, NEXUS_AGENT_PROMPT, NEXUS_BASE_URL e NEXUS_CUSTOM_PROVIDER."
+            "NEXUS_ACCOUNT_NAME, NEXUS_AGENT_NAME, NEXUS_AGENT_PROMPT, NEXUS_BASE_URL, "
+            "NEXUS_CUSTOM_PROVIDER e NEXUS_RUNTIME_MODE."
         )
 
     password_hash, salt = create_password_hash(password)
@@ -77,12 +81,13 @@ def build_setup_config_from_env() -> NexusConfig:
         custom_provider=custom_provider,
     )
     agent = make_agent(name=agent_name, account_id=account.id, system_prompt=agent_prompt)
-    return build_initial_config(password_hash, salt, ui_mode, account, agent)
+    return build_initial_config(password_hash, salt, ui_mode, account, agent, runtime_mode=runtime_mode)
 
 
 def prompt_initial_config(console: Console) -> NexusConfig:
     ui_mode = prompt_ui_mode(console)
-    account = prompt_account_config(console, existing_ids=set(), default_name="Conta principal")
+    runtime_mode = prompt_runtime_mode(console)
+    account = prompt_account_config(console, existing_ids=set(), default_name="Conta principal", runtime_mode=runtime_mode)
     agent = prompt_agent_config(
         console,
         account_id=account.id,
@@ -93,7 +98,7 @@ def prompt_initial_config(console: Console) -> NexusConfig:
     if not password:
         raise SystemExit("Setup cancelado: senha obrigatoria.")
     password_hash, salt = create_password_hash(password)
-    return build_initial_config(password_hash, salt, ui_mode, account, agent)
+    return build_initial_config(password_hash, salt, ui_mode, account, agent, runtime_mode=runtime_mode)
 
 
 def prompt_ui_mode(console: Console) -> str:
@@ -112,10 +117,28 @@ def prompt_ui_mode(console: Console) -> str:
     return "visual"
 
 
+def prompt_runtime_mode(console: Console) -> str:
+    options = [("hybrid", "Hibrido"), ("offline", "Offline"), ("online", "Online")]
+    console.print("[bold yellow]Escolha o runtime:[/bold yellow]")
+    console.print("1. Hibrido (comandos locais sempre; LLM quando disponivel)")
+    console.print("2. Offline (sem API remota; aceita modelo local)")
+    console.print("3. Online (prioriza LLM configurado)")
+    raw = console.input("[bold cyan]Runtime [1-3]:[/bold cyan] ").strip()
+    if raw.isdigit():
+        selected = int(raw)
+        if 1 <= selected <= len(options):
+            return options[selected - 1][0]
+    for mode, label in options:
+        if raw.lower() in {mode, label.lower()}:
+            return mode
+    return "hybrid"
+
+
 def prompt_account_config(
     console: Console,
     existing_ids: set[str],
     default_name: str = "Conta",
+    runtime_mode: str = "hybrid",
 ) -> object:
     providers = list(KNOWN_PROVIDERS)
     console.print("[bold yellow]Escolha o provider:[/bold yellow]")
@@ -154,7 +177,7 @@ def prompt_account_config(
     if provider == "Custom" and not custom_provider:
         raise SystemExit("Setup cancelado: provider custom exige Nome/ID do provider.")
 
-    validate_account_inputs(provider, api_key, model_name, base_url)
+    validate_account_inputs(provider, api_key, model_name, base_url, runtime_mode)
     return make_account(
         name=account_name,
         provider=provider,
@@ -196,9 +219,11 @@ def parse_provider_choice(raw: str, providers: list[str]) -> str:
     return "OpenAI"
 
 
-def validate_account_inputs(provider: str, api_key: str, model_name: str, base_url: str) -> None:
-    if not api_key or not model_name:
-        raise SystemExit("Setup cancelado: API key e model sao obrigatorios.")
+def validate_account_inputs(provider: str, api_key: str, model_name: str, base_url: str, runtime_mode: str) -> None:
+    if not model_name:
+        raise SystemExit("Setup cancelado: model e obrigatorio.")
+    if provider_requires_api_key(provider, base_url, runtime_mode=runtime_mode) and not api_key:
+        raise SystemExit("Setup cancelado: API key e obrigatoria para este provider/runtime.")
     if normalize_provider(provider) == "Custom" and not base_url.strip():
         raise SystemExit("Setup cancelado: provider custom exige Base URL / Endpoint.")
 

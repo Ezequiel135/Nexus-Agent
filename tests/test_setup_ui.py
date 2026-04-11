@@ -40,6 +40,7 @@ class SetupUiTests(IsolatedAsyncioTestCase):
         save_config.assert_called_once()
         self.assertIsNotNone(app.return_value)
         self.assertEqual(app.return_value.ui_mode, "visual")
+        self.assertEqual(app.return_value.runtime_mode, "hybrid")
         self.assertEqual(app.return_value.provider, "OpenAI")
         self.assertEqual(app.return_value.model_name, "gpt-4o-mini")
 
@@ -56,4 +57,4 @@ class SetupUiTests(IsolatedAsyncioTestCase):
         self.assertIn("Interface inicial", svg)
         self.assertIn("Conta principal", svg)
         self.assertIn("OpenAI", svg)
-        self.assertIn("Nome da conta", svg)
+        self.assertIn("Runtime", svg)

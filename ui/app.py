@@ -17,7 +17,7 @@ from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal, Vertical, VerticalScroll
 from textual.widgets import Button, Footer, Input, RichLog, Static
 
-from core.actions import AcoesAgente
+from core.actions import AcoesAgente, CancelledExecution
 from core.config import (
     KNOWN_PROVIDERS,
     NexusConfig,
@@ -27,12 +27,15 @@ from core.config import (
     make_account,
     make_agent,
     normalize_provider,
+    normalize_runtime_mode,
+    provider_requires_api_key,
     save_config,
 )
 from core.llm import LiteLLMBridge
 from core.logging_utils import log_event
+from core.memory import clear_memory, memory_summary, remember
 from core.state import ActivityMonitor, LIGHT_COLORS, LIGHT_SYMBOLS
-from core.safeguards import assess_command_light
+from core.safeguards import assess_command_light, blocked_examples, blocked_reasons
 from core.version import APP_VERSION
 
 
@@ -47,6 +50,7 @@ def _cpu_and_ram() -> str:
 @dataclass(slots=True)
 class SetupPayload:
     ui_mode: str
+    runtime_mode: str
     account_name: str
     provider: str
     model_name: str
@@ -93,12 +97,20 @@ class StatusBar(Static):
 
     def refresh_status(self) -> None:
         snap = self.monitor.read()
-        mode = "MISSION_MODE=ON" if snap.autonomous_mode else "AUTO=OFF"
+        mode = "MISSION_MODE=ON" if getattr(snap, "autonomous_mode", False) else "AUTO=OFF"
         account_name = self.config.active_account.name if self.config and self.config.active_account else "-"
         agent_name = self.config.active_agent.name if self.config and self.config.active_agent else "-"
+        runtime_mode = getattr(self.config, "runtime_mode", "-") if self.config else "-"
+        current_step = getattr(snap, "current_step", 0)
+        total_steps = getattr(snap, "total_steps", 0)
+        progress = f" | passo={current_step}/{total_steps}" if total_steps else ""
+        detail_text = getattr(snap, "detail", "")
+        detail = f" | {detail_text}" if detail_text else ""
+        cancel = " | Esc cancela" if getattr(snap, "cancellable", False) else ""
         self.update(
-            f"[black on bright_cyan] Modelo: {snap.current_model} | Latencia: {snap.api_latency_ms} ms | "
-            f"{_cpu_and_ram()} | conta={account_name} | agente={agent_name} | {mode} | Ezequiel 135 [/]"
+            f"[black on bright_cyan] Modelo: {getattr(snap, 'current_model', '-')} | Latencia: {getattr(snap, 'api_latency_ms', 0)} ms | "
+            f"{_cpu_and_ram()} | runtime={runtime_mode} | conta={account_name} | agente={agent_name} | "
+            f"{mode}{progress}{detail}{cancel} | Ezequiel 135 [/]"
         )
 
 
@@ -273,6 +285,9 @@ class SetupApp(App[SetupPayload | None]):
                     yield Static("Interface inicial", classes="setup-label")
                     yield Static("Valores aceitos: visual ou plain.", classes="setup-hint")
                     yield Input(value="visual", placeholder="visual ou plain", id="ui_mode", classes="field")
+                    yield Static("Runtime", classes="setup-label")
+                    yield Static("Valores aceitos: hybrid, offline ou online.", classes="setup-hint")
+                    yield Input(value="hybrid", placeholder="hybrid / offline / online", id="runtime_mode", classes="field")
                     yield Static("Nome da conta", classes="setup-label")
                     yield Static("Exemplo: Conta principal, Trabalho, Cliente X.", classes="setup-hint")
                     yield Input(value="Conta principal", id="account_name", classes="field")
@@ -369,6 +384,7 @@ class SetupApp(App[SetupPayload | None]):
 
     def action_reset_setup(self) -> None:
         self.query_one("#ui_mode", Input).value = "visual"
+        self.query_one("#runtime_mode", Input).value = "hybrid"
         self.query_one("#account_name", Input).value = "Conta principal"
         self.query_one("#provider", Input).value = "OpenAI"
         self.query_one("#custom_provider", Input).value = ""
@@ -423,6 +439,7 @@ class SetupApp(App[SetupPayload | None]):
     def _visible_setup_order(self) -> list[str]:
         order = [
             "ui_mode",
+            "runtime_mode",
             "account_name",
             "provider",
             "custom_provider",
@@ -448,6 +465,7 @@ class SetupApp(App[SetupPayload | None]):
 
     def _update_setup_summary(self) -> None:
         ui_mode = self.query_one("#ui_mode", Input).value.strip().lower() or "visual"
+        runtime_mode = normalize_runtime_mode(self.query_one("#runtime_mode", Input).value.strip().lower() or "hybrid")
         provider = self.query_one("#provider", Input).value.strip() or "OpenAI"
         custom_provider = self.query_one("#custom_provider", Input).value.strip()
         provider_label = custom_provider if normalize_provider(provider) == "Custom" and custom_provider else provider
@@ -462,11 +480,12 @@ class SetupApp(App[SetupPayload | None]):
             ui_label = ui_mode
         self.query_one("#setup-live-status", Static).update(
             f"UI: {ui_label} | Conta: {account_name} | Agente: {agent_name} | "
-            f"Provider: {provider_label} | Modelo: {model_name}"
+            f"Runtime: {runtime_mode} | Provider: {provider_label} | Modelo: {model_name}"
         )
 
     def _submit_setup(self) -> None:
         ui_mode = self.query_one("#ui_mode", Input).value.strip().lower() or "visual"
+        runtime_mode = normalize_runtime_mode(self.query_one("#runtime_mode", Input).value.strip().lower() or "hybrid")
         account_name = self.query_one("#account_name", Input).value.strip() or "Conta principal"
         provider = self.query_one("#provider", Input).value.strip() or "OpenAI"
         custom_provider = self.query_one("#custom_provider", Input).value.strip()
@@ -481,9 +500,9 @@ class SetupApp(App[SetupPayload | None]):
             self._set_feedback("Campo Interface inicial aceita apenas: visual ou plain.", "error")
             self._focus_field("ui_mode")
             return
-        if not api_key:
-            self._set_feedback("Informe a API Key da conta.", "error")
-            self._focus_field("api_key")
+        if runtime_mode not in {"online", "hybrid", "offline"}:
+            self._set_feedback("Campo Runtime aceita apenas: hybrid, offline ou online.", "error")
+            self._focus_field("runtime_mode")
             return
         if not model_name:
             self._set_feedback("Informe o modelo principal da conta.", "error")
@@ -501,6 +520,10 @@ class SetupApp(App[SetupPayload | None]):
             self._set_feedback("Provider custom exige Base URL / Endpoint.", "error")
             self._focus_field("base_url")
             return
+        if provider_requires_api_key(provider, base_url, runtime_mode=runtime_mode) and not api_key:
+            self._set_feedback("Informe a API Key da conta para esse provider/runtime.", "error")
+            self._focus_field("api_key")
+            return
 
         password_hash, salt = create_password_hash(password)
         account = make_account(
@@ -516,14 +539,14 @@ class SetupApp(App[SetupPayload | None]):
             account_id=account.id,
             system_prompt=agent_prompt,
         )
-        save_config(build_initial_config(password_hash, salt, ui_mode, account, agent))
+        save_config(build_initial_config(password_hash, salt, ui_mode, account, agent, runtime_mode=runtime_mode))
         self._set_feedback("Configuracao salva com sucesso. Fechando setup...", "success")
-        self.exit(SetupPayload(ui_mode, account_name, provider, model_name, agent_name, password))
+        self.exit(SetupPayload(ui_mode, runtime_mode, account_name, provider, model_name, agent_name, password))
 
 
 class MissionPanel(Static):
-    """Shows current mission plan and step progress."""
-    pass
+    def set_text(self, text: str) -> None:
+        self.update(text)
 
 
 class GreenLightBar(Static):
@@ -555,7 +578,11 @@ class NexusApp(App[None]):
     #light-bar { text-style: bold; dock: top; height: 1; content-align: center middle; background: #0a2a0a; }
     """
 
-    BINDINGS = [("ctrl+c", "quit", "Sair"), ("ctrl+m", "mission_mode", "Modo Missao")]
+    BINDINGS = [
+        ("ctrl+c", "quit", "Sair"),
+        ("ctrl+m", "mission_mode", "Auto Plan"),
+        ("escape", "cancel_current", "Cancelar"),
+    ]
 
     def __init__(self, bridge: LiteLLMBridge, monitor: ActivityMonitor, initial_task: str | None = None) -> None:
         super().__init__()
@@ -564,32 +591,45 @@ class NexusApp(App[None]):
         self.initial_task = initial_task
         self.conversation: list[dict[str, str]] = []
         self.mission_mode = False
+        self.pending_plan: dict[str, Any] | None = None
+        self.cancel_event = threading.Event()
+        self.worker_thread: threading.Thread | None = None
 
     def compose(self) -> ComposeResult:
         yield GreenLightBar(id="light-bar")
         yield NexusHeader(self.monitor)
-        yield MissionPanel("", id="mission-panel")
+        yield MissionPanel("Sem plano pendente. Use /help para ver atalhos locais.", id="mission-panel")
         with Horizontal(id="body"):
             with Vertical(id="chat-panel"):
                 yield Static("Conversation", classes="panel-title")
-                yield Static("Descreva o objetivo. O agente usa shell, arquivos, tela, memoria, MCP e notebooks automaticamente.", classes="hint-box")
+                yield Static(
+                    "Descreva o objetivo ou use /help. O agente mostra plano, progresso, dry-run e aprovacoes como Codex/Claude Code.",
+                    classes="hint-box",
+                )
                 yield RichLog(id="chat-log", markup=True, wrap=True)
                 yield Input(placeholder="Digite um objetivo ou comando para o Nexus...", id="prompt")
             with Vertical(id="log-panel"):
                 yield Static("Action & Log Panel", classes="panel-title")
-                yield Static("Comandos uteis: onboarding | blocked | accounts | agents | parallel | mcp | notebook | remote", classes="hint-box")
+                yield Static(
+                    "Comandos uteis: /help, /approve, /cancel, /settings, /mode offline, /dry-run off",
+                    classes="hint-box",
+                )
                 yield RichLog(id="action-log", markup=True, wrap=True)
         yield StatusBar(self.monitor, self.bridge.config)
         yield Footer()
 
     def on_mount(self) -> None:
         self.bridge.actions.set_event_callback(lambda text: self.call_from_thread(self._write_log, text))
+        if hasattr(self.bridge.actions, "set_cancel_event"):
+            self.bridge.actions.set_cancel_event(self.cancel_event)
+        self.query_one("#chat-log", RichLog).can_focus = False
+        self.query_one("#action-log", RichLog).can_focus = False
         self.conversation = self._load_history()
         ok, message = self.bridge.handshake()
         self._write_chat(f"[bold green]NEXUS AGENT {APP_VERSION} ONLINE[/bold green]" if ok else f"[bold red]{message}[/bold red]")
         self._write_chat(
-            "Use esta interface como um agente autonomo. "
-            "Descreva um objetivo (ex: 'organiza minha pasta Downloads') e o NEXUS PLANEJA + EXECUTA."
+            "Use esta interface como um agente local com preview de plano, dry-run e cancelamento. "
+            "Prompts complexos podem gerar um plano antes da execucao; aprove com `/approve`."
         )
         self._write_log(message)
         if self.bridge.config.active_account is not None:
@@ -602,8 +642,9 @@ class NexusApp(App[None]):
             state = "ARMADO" if self.bridge.config.remote_armed else "DESARMADO"
             self._write_log(f"Remote bots: {len(self.bridge.config.remote_integrations)} integracao(oes) | {state}")
         self._write_log(f"Notebook root: {NexusPaths.notebooks_dir}")
-        self._write_log("Modo Missao: decomposicao automatica de tarefas. Execucao paralela disponivel via CLI.")
+        self._write_log("Auto plan, dry-run e cancelamento por Esc habilitados. Execucao paralela disponivel via CLI.")
         self.call_after_refresh(self._focus_prompt)
+        self.set_timer(0.05, self._focus_prompt)
         if self.initial_task:
             self.query_one("#prompt", Input).value = self.initial_task
             self._submit_prompt(self.initial_task)
@@ -616,6 +657,9 @@ class NexusApp(App[None]):
 
     def _write_log(self, text: str) -> None:
         self.query_one("#action-log", RichLog).write(text)
+
+    def _set_mission_panel(self, text: str) -> None:
+        self.query_one("#mission-panel", MissionPanel).set_text(text)
 
     def _set_light(self, assessment: str) -> None:
         light = self.query_one("#light-bar", GreenLightBar)
@@ -637,19 +681,198 @@ class NexusApp(App[None]):
 
     def _submit_prompt(self, prompt: str) -> None:
         self._write_chat(f"**Você:** {prompt}")
-        # Se o prompt parece uma tarefa complexa, ativa mission mode
-        if len(prompt.split()) > 4 or any(w in prompt.lower() for w in ["organizar", "criar", "baixar", "instalar", "configurar", "buscar", "processar"]):
+        if prompt.startswith("/"):
+            self._handle_slash(prompt)
+            return
+        if self._worker_running():
+            self._write_log("[WARN] Ja existe uma execucao em andamento. Pressione Esc para cancelar.")
+            return
+        if self._should_preview_plan(prompt):
             self.mission_mode = True
-            threading.Thread(target=self._process_plan, args=(prompt,), daemon=True).start()
+            self._start_worker(self._process_plan_preview, prompt)
         else:
             self.mission_mode = False
-            threading.Thread(target=self._process_simple, args=(prompt,), daemon=True).start()
+            self._start_worker(self._process_simple, prompt)
+
+    def _worker_running(self) -> bool:
+        return bool(self.worker_thread and self.worker_thread.is_alive())
+
+    def _start_worker(self, target, *args) -> None:
+        self.cancel_event.clear()
+        self.worker_thread = threading.Thread(target=target, args=args, daemon=True)
+        self.worker_thread.start()
+
+    def _should_preview_plan(self, prompt: str) -> bool:
+        lowered = prompt.lower()
+        keywords = ["organizar", "criar", "baixar", "instalar", "configurar", "buscar", "processar", "mover", "apagar"]
+        return bool(
+            self.bridge.config.plan_before_execute
+            and (len(prompt.split()) > 4 or any(word in lowered for word in keywords))
+        )
+
+    def action_mission_mode(self) -> None:
+        self.bridge.config.plan_before_execute = not self.bridge.config.plan_before_execute
+        self._write_log(f"plan_before_execute={self.bridge.config.plan_before_execute}")
+        self._set_mission_panel(
+            f"Auto plan {'ativado' if self.bridge.config.plan_before_execute else 'desativado'} | "
+            f"dry_run={self.bridge.config.dry_run} | runtime={self.bridge.config.runtime_mode}"
+        )
+
+    def action_cancel_current(self) -> None:
+        self.cancel_event.set()
+        self.pending_plan = None
+        self.monitor.set_state("idle", detail="Execucao cancelada pelo usuario.")
+        self.monitor.set_cancellable(False)
+        self._set_mission_panel("Execucao/plano cancelado. Nenhuma acao pendente.")
+        self._write_log("[WARN] Cancelamento solicitado pelo usuario.")
+
+    def _handle_slash(self, prompt: str) -> None:
+        command = prompt.strip().lower()
+        if command == "/help":
+            self._write_chat(
+                "\n".join(
+                    [
+                        "**Comandos locais**",
+                        "- `/help` ajuda",
+                        "- `/settings` runtime/dry-run/auto-plan",
+                        "- `/plan on|off` liga/desliga preview automatico",
+                        "- `/dry-run on|off` liga/desliga dry-run",
+                        "- `/mode online|hybrid|offline` troca runtime atual",
+                        "- `/approve` executa plano pendente",
+                        "- `/cancel` cancela plano pendente/execucao",
+                        "- `/status`, `/tools`, `/memory`, `/blocked`, `/accounts`, `/agents`, `/mcp`, `/remote`, `/clear`",
+                    ]
+                )
+            )
+            return
+        if command == "/status":
+            snap = self.monitor.read()
+            self._write_chat(
+                "\n".join(
+                    [
+                        "**Status**",
+                        f"- state={snap.state}",
+                        f"- runtime={self.bridge.config.runtime_mode}",
+                        f"- dry_run={self.bridge.config.dry_run}",
+                        f"- plan_before_execute={self.bridge.config.plan_before_execute}",
+                        f"- model={snap.current_model}",
+                        f"- detail={snap.detail or '-'}",
+                    ]
+                )
+            )
+            return
+        if command == "/settings":
+            self._write_chat(
+                "\n".join(
+                    [
+                        "**Settings**",
+                        f"- runtime={self.bridge.config.runtime_mode}",
+                        f"- dry_run={self.bridge.config.dry_run}",
+                        f"- plan_before_execute={self.bridge.config.plan_before_execute}",
+                        f"- llm_cache_enabled={self.bridge.config.llm_cache_enabled}",
+                        f"- max_tool_rounds={self.bridge.config.max_tool_rounds}",
+                        f"- max_output_tokens={self.bridge.config.max_output_tokens}",
+                    ]
+                )
+            )
+            return
+        if command in {"/approve", "/run"}:
+            if self.pending_plan is None:
+                self._write_log("Nenhum plano pendente para executar.")
+                return
+            if self._worker_running():
+                self._write_log("Ja existe uma execucao em andamento.")
+                return
+            self._start_worker(self._execute_pending_plan)
+            return
+        if command == "/cancel":
+            self.action_cancel_current()
+            return
+        if command.startswith("/plan "):
+            value = command.split(" ", 1)[1].strip()
+            self.bridge.config.plan_before_execute = value in {"on", "1", "true", "auto"}
+            self._write_log(f"plan_before_execute={self.bridge.config.plan_before_execute}")
+            return
+        if command.startswith("/dry-run "):
+            value = command.split(" ", 1)[1].strip()
+            self.bridge.config.dry_run = value in {"on", "1", "true"}
+            self._write_log(f"dry_run={self.bridge.config.dry_run}")
+            return
+        if command.startswith("/mode "):
+            value = command.split(" ", 1)[1].strip()
+            if value not in {"online", "hybrid", "offline"}:
+                self._write_log("Use /mode online|hybrid|offline")
+                return
+            self.bridge.config.runtime_mode = value
+            self._write_log(f"runtime_mode={value}")
+            return
+        if command == "/tools":
+            self._write_chat(f"```text\n{self.bridge.actions.capabilities_summary()}\n```")
+            return
+        if command == "/memory":
+            self._write_chat(f"```text\n{memory_summary()}\n```")
+            return
+        if command.startswith("/remember "):
+            text = prompt[len("/remember ") :].strip()
+            if text:
+                remember(text, source="user", kind="manual")
+                self._write_log("Memoria salva.")
+            return
+        if command == "/forget-all":
+            clear_memory()
+            self._write_log("Memoria apagada.")
+            return
+        if command == "/blocked":
+            lines = ["**Bloqueios de seguranca**"]
+            lines.extend(f"- {reason}" for reason in blocked_reasons())
+            lines.append("")
+            lines.extend(f"- `{example}`" for example in blocked_examples())
+            self._write_chat("\n".join(lines))
+            return
+        if command == "/accounts":
+            if not self.bridge.config.accounts:
+                self._write_log("Nenhuma conta configurada.")
+                return
+            self._write_chat("\n".join([f"- {account.name} | {account.provider_label} | {account.model_name}" for account in self.bridge.config.accounts]))
+            return
+        if command == "/agents":
+            if not self.bridge.config.agents:
+                self._write_log("Nenhum agente configurado.")
+                return
+            self._write_chat("\n".join([f"- {agent.name} | conta={agent.account_id}" for agent in self.bridge.config.agents]))
+            return
+        if command == "/mcp":
+            if not self.bridge.config.mcp_servers:
+                self._write_log("Nenhum servidor MCP configurado.")
+                return
+            self._write_chat("\n".join([f"- {server.name} | {server.command}" for server in self.bridge.config.mcp_servers]))
+            return
+        if command == "/remote":
+            if not self.bridge.config.remote_integrations:
+                self._write_log("Nenhuma integracao remota configurada.")
+                return
+            self._write_chat(
+                "\n".join(
+                    [
+                        f"- {integration.name} | canal={integration.channel} | prefixo={integration.command_prefix}"
+                        for integration in self.bridge.config.remote_integrations
+                    ]
+                )
+            )
+            return
+        if command == "/clear":
+            self.query_one("#chat-log", RichLog).clear()
+            self.query_one("#action-log", RichLog).clear()
+            self._set_mission_panel("Logs limpos. Nenhum plano pendente.")
+            return
+        self._write_log(f"Comando desconhecido: {prompt}")
 
     def _process_simple(self, prompt: str) -> None:
         try:
             log_event("PROMPT", prompt)
             self.conversation.append({"role": "user", "content": prompt})
             self._save_history()
+            self._set_mission_panel("Execucao direta em andamento...")
             answer, tool_logs = self.bridge.chat(self.conversation)
             self.conversation.append({"role": "assistant", "content": answer})
             self._save_history()
@@ -658,82 +881,87 @@ class NexusApp(App[None]):
                 self.call_from_thread(self._write_log, item)
             if not tool_logs:
                 self.call_from_thread(self._write_log, "Nenhuma ferramenta local usada.")
+            self.call_from_thread(self._set_mission_panel, "Execucao direta concluida.")
+        except CancelledExecution as exc:
+            self.call_from_thread(self._write_chat, f"**CANCELADO:** {exc}")
+            self.call_from_thread(self._write_log, f"[WARN] {exc}")
+            self.call_from_thread(self._set_mission_panel, "Execucao cancelada.")
         except Exception as exc:
             self.monitor.set_state("error", str(exc))
             self.call_from_thread(self._write_chat, f"**ERRO:** {exc}")
             self.call_from_thread(self._write_log, f"[ERROR] {exc}")
         finally:
+            self.monitor.set_cancellable(False)
             self.call_from_thread(self._focus_prompt)
 
-    def _process_plan(self, prompt: str) -> None:
+    def _process_plan_preview(self, prompt: str) -> None:
         try:
             log_event("MISSION", prompt)
             self.call_from_thread(self._write_chat, f"[bold cyan]🎯 MODO MISSAO ATIVADO[/bold cyan]")
             self.call_from_thread(self._write_chat, f"[dim]Criando plano para: {prompt}[/dim]")
-
-            result = self.bridge.chat_with_plan(prompt)
-
-            goal = result.get("goal", "")
-            steps = result.get("results", [])
-            summary = result.get("summary", "")
-
-            # Mostra o plano
+            preview = self.bridge.preview_plan(prompt)
+            self.pending_plan = preview
+            steps = preview.get("steps", [])
             plan_lines = ["[bold yellow]📋 PLANO:[/bold yellow]"]
             for s in steps:
                 plan_lines.append(f"  {s['step']}. {s['task']}")
                 if s.get("tool"):
-                    plan_lines.append(f"     [cyan]→ {s['tool']}({s.get('args', {})})[/cyan]")
+                    risk = str(s.get("risk_level", "green")).upper()
+                    plan_lines.append(f"     [cyan]→ {s['tool']}({s.get('args', {})}) [{risk}][/cyan]")
+            plan_lines.append("")
+            plan_lines.append("[bold]Use /approve para executar ou Esc//cancel para abortar.[/bold]")
             self.call_from_thread(self._write_chat, "\n".join(plan_lines))
-
-            # Executa cada passo — cada passo gera log proprio
-            self.call_from_thread(self._write_chat, f"[bold green]🚀 EXECUTANDO {len(steps)} PASSOS...[/bold green]")
-
-            all_logs: list[str] = []
-            for s in steps:
-                log_line = f" PASSO {s['step']}/{len(steps)}: {s['task'][:60]}"
-                self.call_from_thread(self._write_log, f"[bold yellow]▶{log_line}[/bold yellow]")
-
-                # Verifica luz verde para comandos shell
-                if s.get("tool") == "executar_comando":
-                    cmd = s.get("args", {}).get("comando", "")
-                    assessment = assess_command_light(cmd)
-                    self.call_from_thread(self._set_light, assessment)
-                    if "Vermelha" in assessment or "Bloqueado" in assessment:
-                        err = f"🚫 {assessment} — comando nao executado"
-                        self.call_from_thread(self._write_log, f"[bold red]{err}[/bold red]")
-                        s["result"] = err
-                        s["status"] = "BLOCKED"
-                        continue
-
-                tool_name = s.get("tool")
-                args = s.get("args") or {}
-                try:
-                    r = self.bridge.actions.executar(tool_name, args) if tool_name else f"[livre] {s.get('task','')}"
-                    s["result"] = str(r)[:200]
-                    s["status"] = "OK"
-                    all_logs.append(f"{tool_name or 'acao'}({args})")
-                except Exception as e:
-                    s["result"] = f"Erro: {e}"
-                    s["status"] = "FAIL"
-                    all_logs.append(f"ERRO: {e}")
-
-            # Volta luz verde
-            self.call_from_thread(self._set_light, "🟢 LUZ VERDE — missao concluida")
-            self.call_from_thread(self._write_chat, f"[bold green]✅ {summary}[/bold green]")
-
-            # Salva na memoria
-            from core.memory import remember
-            remember(f"Missao: {prompt} — {len(steps)} passos executados", kind="mission")
-
-            # Log final
-            self.call_from_thread(self._write_log, f"[bold green]MISSION COMPLETE: {len(steps)} etapas[/bold green]")
-
+            mission_text = [f"Objetivo: {preview.get('goal', '-')}", f"Passos: {len(steps)}"]
+            if preview.get("requires_confirmation"):
+                mission_text.append("Aguardando /approve")
+            self.call_from_thread(self._set_mission_panel, "\n".join(mission_text))
+            if steps:
+                for step in steps:
+                    if step.get("tool") == "executar_comando":
+                        assessment = assess_command_light(str(step.get("args", {}).get("comando", "")))
+                        self.call_from_thread(self._set_light, assessment)
+                        if "VERMELHA" in assessment.upper():
+                            break
+        except CancelledExecution as exc:
+            self.call_from_thread(self._write_chat, f"**CANCELADO:** {exc}")
+            self.call_from_thread(self._set_mission_panel, "Preview cancelado.")
         except Exception as exc:
             self.monitor.set_state("error", str(exc))
-            self.call_from_thread(self._set_light, f"🔴 ERRO: {exc}", "🔴")
+            self.call_from_thread(self._set_light, f"ERRO: {exc}")
             self.call_from_thread(self._write_chat, f"**ERRO:** {exc}")
             self.call_from_thread(self._write_log, f"[ERROR] {exc}")
         finally:
+            self.monitor.set_cancellable(False)
+            self.call_from_thread(self._focus_prompt)
+
+    def _execute_pending_plan(self) -> None:
+        preview = self.pending_plan
+        if preview is None:
+            self.call_from_thread(self._write_log, "Nenhum plano pendente.")
+            return
+        self.pending_plan = None
+        try:
+            goal = str(preview.get("goal", ""))
+            steps = preview.get("steps", [])
+            self.call_from_thread(self._write_chat, f"[bold green]🚀 EXECUTANDO {len(steps)} PASSOS...[/bold green]")
+            self.call_from_thread(self._set_mission_panel, f"Executando plano: {goal}")
+            result = self.bridge.execute_plan(goal, steps if isinstance(steps, list) else [])
+            self.call_from_thread(self._write_chat, f"[bold green]✅ {result.get('summary', '(sem resumo)')}[/bold green]")
+            remember(f"Missao: {goal} — {len(result.get('results', []))} passos executados", kind="mission")
+            self.call_from_thread(self._set_light, "LUZ VERDE — missao concluida")
+            self.call_from_thread(self._write_log, f"[bold green]MISSION COMPLETE: {len(result.get('results', []))} etapas[/bold green]")
+            self.call_from_thread(self._set_mission_panel, f"Plano concluido: {goal}")
+        except CancelledExecution as exc:
+            self.call_from_thread(self._write_chat, f"**CANCELADO:** {exc}")
+            self.call_from_thread(self._write_log, f"[WARN] {exc}")
+            self.call_from_thread(self._set_mission_panel, "Plano cancelado.")
+        except Exception as exc:
+            self.monitor.set_state("error", str(exc))
+            self.call_from_thread(self._write_chat, f"**ERRO:** {exc}")
+            self.call_from_thread(self._write_log, f"[ERROR] {exc}")
+            self.call_from_thread(self._set_mission_panel, "Falha na execucao do plano.")
+        finally:
+            self.monitor.set_cancellable(False)
             self.call_from_thread(self._focus_prompt)
 
     def _load_history(self) -> list[dict[str, str]]:
@@ -749,7 +977,7 @@ class NexusApp(App[None]):
     def _save_history(self) -> None:
         NexusPaths.ensure()
         NexusPaths.history_path.write_text(
-            json.dumps(self.conversation[-24:], indent=2, ensure_ascii=False),
+            json.dumps(self.conversation[-self.bridge.config.max_history_messages :], indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
 

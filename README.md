@@ -1,4 +1,4 @@
-# NEXUS AGENT 26.1.2
+# NEXUS AGENT 26.2.0
 
 <div align="center">
 
@@ -58,7 +58,7 @@ Diferente de assistentes que só respondem, o Nexus **planeja, age e reporta**. 
 - **Capacidades:** shell, arquivos, OCR, mouse, teclado, memória, MCP, notebooks e bots remotos.
 - **Escala:** múltiplas contas, múltiplos agentes e execução paralela.
 - **Segurança:** comandos avaliados por Luz Verde antes da execução.
-- **Versão atual:** `26.1.2`, com versionamento CalVer.
+- **Versão atual:** `26.2.0`, com versionamento CalVer.
 - **Histórico de mudanças:** veja `CHANGELOG.md` para correções e melhorias recentes.
 
 ### Quick Start
@@ -70,6 +70,13 @@ chmod +x install.sh nexus
 ./install.sh
 nexus
 ```
+
+### Destaques da 26.2.0
+
+- Runtime `online`, `hybrid` e `offline`, com comandos slash funcionando sem depender de API remota.
+- Preview de plano antes de executar, com `/approve`, `/cancel` e cancelamento com `Esc` na UI visual.
+- Dry-run, backups automáticos, auditoria JSONL e whitelist de shell para reduzir risco de perda de dados.
+- Cache local de respostas, limites de contexto/tokens e startup inicial mais leve por handshake remoto adiado.
 
 ---
 
@@ -102,8 +109,9 @@ Sandbox de segurança integrado em cada comando:
 ### 🎯 Modo Missão
 Para tarefas com +4 palavras ou palavras-chave ("organizar", "criar", "instalar"), o agente ativa automaticamente o Modo Missão:
 1. Mostra o plano completo antes de executar
-2. Executa cada passo com logs
-3. Salva a missão na memória local
+2. Espera aprovação explícita com `/approve` quando necessário
+3. Executa cada passo com logs, dry-run e cancelamento
+4. Salva a missão na memória local
 
 ### 📡 Installer Viral
 Instalador multiplataforma que funciona de primeira:
@@ -144,9 +152,9 @@ Se quiser forçar um navegador específico, defina `NEXUS_BROWSER=chrome`, `chro
 
 ## MCP
 
-Na linha `26.1.2`, o NEXUS AGENT suporta **MCP (Model Context Protocol)** via `stdio`.
+Na linha `26.2.0`, o NEXUS AGENT suporta **MCP (Model Context Protocol)** via `stdio`.
 
-### MCP na versão 26.1.2
+### MCP na versão 26.2.0
 
 - Cadastro de servidores MCP no `config.json`
 - Comandos CLI para adicionar, listar, ler recursos e remover servidores MCP
@@ -176,9 +184,9 @@ nexus mcp remove filesystem
 
 ## Notebook + Bots Remotos
 
-A versão `26.1.2` mantém **Notebook integration (Jupyter)**, **automação remota por bots** e **agentes múltiplos em paralelo**, com foco nesta release em corrigir de forma mais agressiva a UI inicial de configuração.
+A versão `26.2.0` mantém **Notebook integration (Jupyter)**, **automação remota por bots** e **agentes múltiplos em paralelo**, agora com runtime offline/hybrid, aprovação manual de plano e endurecimento forte de segurança.
 
-### O que entra na 26.1.2
+### O que entra na 26.2.0
 
 - UI inicial de configuração refeita do zero, com layout responsivo, rolagem e foco correto
 - Campos de texto e navegação do setup ajustados para evitar travamentos
@@ -234,7 +242,7 @@ nexus remote disarm
 ## Arquitetura
 
 ```
-NEXUS AGENT 26.1.2
+NEXUS AGENT 26.2.0
 ├── core/
 │   ├── llm.py           # LiteLLMBridge + PlannerExecutor
 │   ├── actions.py       # AcoesAgente (ToolRegistry)

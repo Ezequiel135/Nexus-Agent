@@ -8,11 +8,13 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 import json
+import threading
 
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from core.actions import CancelledExecution
 from core.config import NexusPaths
 from core.llm import LiteLLMBridge
 from core.logging_utils import log_event
@@ -69,7 +71,10 @@ class PlainNexusCLI:
         self.first_run = first_run
         self.console = Console()
         self.conversation: list[dict[str, str]] = []
+        self.pending_plan: dict[str, object] | None = None
+        self.cancel_event = threading.Event()
         self.bridge.actions.set_event_callback(self._write_log)
+        self.bridge.actions.set_cancel_event(self.cancel_event)
 
     def run(self) -> int:
         self.conversation = self._load_history()
@@ -139,16 +144,60 @@ class PlainNexusCLI:
         self.console.print(Panel.fit(prompt, title="Voce", border_style="cyan"))
         log_event("PROMPT", prompt)
         remember(prompt, source="user", kind="prompt")
-        self.conversation.append({"role": "user", "content": prompt})
-        self._save_history()
         try:
-            answer, _tool_logs = self.bridge.chat(self.conversation)
-            self.conversation.append({"role": "assistant", "content": answer})
-            self._save_history()
-            self.console.print(Panel.fit(answer or "(sem resposta)", title="NEXUS AGENT", border_style="green"))
+            if self._should_preview_plan(prompt):
+                self.pending_plan = self.bridge.preview_plan(prompt)
+                self._render_plan_preview(self.pending_plan)
+                return
+            self._run_chat(prompt)
+        except CancelledExecution as exc:
+            self.console.print(Panel.fit(str(exc), title="CANCELADO", border_style="yellow"))
         except Exception as exc:
             self.monitor.set_state("error", str(exc))
             self.console.print(Panel.fit(str(exc), title="ERRO", border_style="red"))
+
+    def _should_preview_plan(self, prompt: str) -> bool:
+        lowered = prompt.lower()
+        keywords = ["organizar", "criar", "baixar", "instalar", "configurar", "buscar", "processar", "mover", "apagar"]
+        return bool(
+            self.bridge.config.plan_before_execute
+            and (len(prompt.split()) > 4 or any(word in lowered for word in keywords))
+        )
+
+    def _render_plan_preview(self, preview: dict[str, object]) -> None:
+        steps = preview.get("steps", []) if isinstance(preview, dict) else []
+        lines = [f"Objetivo: {preview.get('goal', '-')}", ""]
+        for step in steps:
+            if not isinstance(step, dict):
+                continue
+            risk = str(step.get("risk_level", "green")).upper()
+            tool_name = step.get("tool") or "livre"
+            lines.append(f"{step.get('step')}. {step.get('task')} [{risk}]")
+            lines.append(f"   tool={tool_name} args={step.get('args', {})}")
+        lines.append("")
+        lines.append("Use /approve para executar ou /cancel para descartar.")
+        self.console.print(Panel.fit("\n".join(lines), title="Plano", border_style="bright_magenta"))
+
+    def _run_chat(self, prompt: str) -> None:
+        self.cancel_event.clear()
+        self.conversation.append({"role": "user", "content": prompt})
+        self._save_history()
+        answer, _tool_logs = self.bridge.chat(self.conversation)
+        self.conversation.append({"role": "assistant", "content": answer})
+        self._save_history()
+        self.console.print(Panel.fit(answer or "(sem resposta)", title="NEXUS AGENT", border_style="green"))
+
+    def _approve_pending_plan(self) -> None:
+        if self.pending_plan is None:
+            self.console.print("[yellow]Nenhum plano pendente.[/yellow]")
+            return
+        preview = self.pending_plan
+        self.pending_plan = None
+        self.cancel_event.clear()
+        goal = str(preview.get("goal", ""))
+        steps = preview.get("steps", [])
+        result = self.bridge.execute_plan(goal, steps if isinstance(steps, list) else [])
+        self.console.print(Panel.fit(result.get("summary", "(sem resumo)"), title="Execucao", border_style="green"))
 
     def _handle_slash(self, prompt: str) -> bool:
         command = prompt.strip().lower()
@@ -171,6 +220,12 @@ class PlainNexusCLI:
             table.add_row("/remember texto", "Salva uma memoria local manualmente")
             table.add_row("/forget-all", "Apaga toda a memoria local")
             table.add_row("/blocked", "Mostra comandos bloqueados")
+            table.add_row("/settings", "Mostra runtime, dry-run e auto-plan")
+            table.add_row("/plan on|off", "Liga/desliga preview automatico de plano")
+            table.add_row("/dry-run on|off", "Liga/desliga modo dry-run")
+            table.add_row("/mode online|hybrid|offline", "Troca o runtime atual")
+            table.add_row("/approve", "Executa o plano pendente")
+            table.add_row("/cancel", "Cancela plano pendente/execucao atual")
             table.add_row("/clear", "Limpa a tela")
             table.add_row("/exit", "Fecha o terminal")
             self.console.print(table)
@@ -280,6 +335,45 @@ class PlainNexusCLI:
             return False
         if command == "/memory":
             self.console.print(Panel.fit(memory_summary(), title="Memoria Local", border_style="magenta"))
+            return False
+        if command == "/settings":
+            self.console.print(
+                Panel.fit(
+                    f"runtime={self.bridge.config.runtime_mode}\n"
+                    f"dry_run={self.bridge.config.dry_run}\n"
+                    f"plan_before_execute={self.bridge.config.plan_before_execute}\n"
+                    f"cache={self.bridge.config.llm_cache_enabled}\n"
+                    f"max_tool_rounds={self.bridge.config.max_tool_rounds}",
+                    title="Settings",
+                    border_style="bright_blue",
+                )
+            )
+            return False
+        if command in {"/approve", "/run"}:
+            self._approve_pending_plan()
+            return False
+        if command == "/cancel":
+            self.cancel_event.set()
+            self.pending_plan = None
+            self.console.print("[yellow]Plano/execucao marcado como cancelado.[/yellow]")
+            return False
+        if command.startswith("/plan "):
+            value = command.split(" ", 1)[1].strip()
+            self.bridge.config.plan_before_execute = value in {"on", "1", "true", "auto"}
+            self.console.print(f"[green]plan_before_execute={self.bridge.config.plan_before_execute}[/green]")
+            return False
+        if command.startswith("/dry-run "):
+            value = command.split(" ", 1)[1].strip()
+            self.bridge.config.dry_run = value in {"on", "1", "true"}
+            self.console.print(f"[green]dry_run={self.bridge.config.dry_run}[/green]")
+            return False
+        if command.startswith("/mode "):
+            value = command.split(" ", 1)[1].strip()
+            if value not in {"online", "hybrid", "offline"}:
+                self.console.print("[yellow]Use /mode online|hybrid|offline[/yellow]")
+                return False
+            self.bridge.config.runtime_mode = value
+            self.console.print(f"[green]runtime_mode={value}[/green]")
             return False
         if command.startswith("/remember "):
             text = prompt[len("/remember ") :].strip()

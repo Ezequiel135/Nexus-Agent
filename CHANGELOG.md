@@ -26,6 +26,28 @@ O formato segue a ideia de:
 - Corrigido o CSS inválido da `NexusApp` que causava falha no parser do Textual.
 - Corrigido o mount da `NexusApp` ao aceitar `id=` em `GreenLightBar`.
 
+## [26.2.0] - 2026-04-10
+
+### Added
+- Runtime `online`, `hybrid` e `offline`, com suporte melhor para modelos locais via `Ollama`/`localhost`.
+- Preview de plano com aprovação manual via `/approve`, cancelamento com `Esc` na UI visual e `/cancel` no terminal plain.
+- Dry-run para ações destrutivas, backups automáticos antes de escrita/move/delete e auditoria em `~/.nexus/audit.jsonl`.
+- Cache local de respostas do LLM e limites configuráveis de histórico, passos do planner e saída do modelo.
+- Testes cobrindo bloqueio de comando malicioso, falhas de I/O, runtime offline e limites de execução.
+
+### Changed
+- O boot inicial ficou mais leve: o handshake remoto agora pode ser adiado para evitar travamento na primeira abertura.
+- O planner foi separado da execução; a UI visual não executa mais o mesmo plano duas vezes.
+- O shell local agora usa whitelist, bloqueia operadores complexos e evita `shell=True` para reduzir risco de perda de dados.
+- Os slash commands passaram a funcionar localmente na UI visual e no modo plain sem depender de API remota.
+- Setup visual/plain agora aceita `runtime_mode` e não exige API key quando o runtime/provedor é local.
+
+### Fixed
+- Corrigida a duplicação de execução no Modo Missão.
+- Corrigida a exibição/foco inicial da `NexusApp`.
+- Corrigido o fluxo do modo `plan` em agentes paralelos.
+- Corrigidos logs com potencial de expor segredos; tokens passam por redação antes de ir para arquivo.
+
 ## [26.1.2] - 2026-04-10
 
 ### Added
