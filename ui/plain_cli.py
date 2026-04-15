@@ -11,9 +11,38 @@ import json
 import threading
 import time
 
-from rich.console import Console
-from rich.panel import Panel
-from rich.table import Table
+try:
+    from rich.console import Console
+    from rich.panel import Panel
+    from rich.table import Table
+except ImportError:
+    class Console:  # type: ignore[override]
+        def print(self, *args, **kwargs) -> None:
+            print(*args)
+
+        def input(self, prompt: str = "") -> str:
+            return input(prompt)
+
+    class Panel:  # type: ignore[override]
+        @staticmethod
+        def fit(renderable, *args, **kwargs):
+            return str(renderable)
+
+    class Table:  # type: ignore[override]
+        def __init__(self, title: str = "") -> None:
+            self.title = title
+            self.rows: list[tuple[str, ...]] = []
+
+        def add_column(self, *args, **kwargs) -> None:
+            return None
+
+        def add_row(self, *values) -> None:
+            self.rows.append(tuple(str(value) for value in values))
+
+        def __str__(self) -> str:
+            lines = [self.title] if self.title else []
+            lines.extend(" | ".join(row) for row in self.rows)
+            return "\n".join(lines)
 
 from core.actions import CancelledExecution
 from core.config import NexusPaths, save_config

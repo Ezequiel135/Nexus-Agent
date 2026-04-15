@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
+import sys
 
 from core.config import NexusPaths
 from core.update_check import check_for_update, installed_repo_url
@@ -23,21 +24,22 @@ class UpdateCheckTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             cache_path = Path(tmpdir) / "update_check.json"
             fake_response = SimpleNamespace(
-                text='APP_VERSION = "26.4.0"\n',
+                text='APP_VERSION = "26.4.1"\n',
                 raise_for_status=lambda: None,
             )
-            with patch.object(NexusPaths, "update_check_path", cache_path), patch(
-                "requests.get",
-                return_value=fake_response,
+            fake_requests = SimpleNamespace(get=lambda *args, **kwargs: fake_response)
+            with patch.object(NexusPaths, "update_check_path", cache_path), patch.dict(
+                sys.modules,
+                {"requests": fake_requests},
             ):
                 info = check_for_update("26.3.1", "https://github.com/Ezequiel135/Nexus-Agent.git")
 
             self.assertTrue(info.checked)
             self.assertTrue(info.update_available)
-            self.assertEqual(info.latest_version, "26.4.0")
+            self.assertEqual(info.latest_version, "26.4.1")
             self.assertTrue(cache_path.exists())
             payload = json.loads(cache_path.read_text(encoding="utf-8"))
-            self.assertEqual(payload["latest_version"], "26.4.0")
+            self.assertEqual(payload["latest_version"], "26.4.1")
 
     def test_check_for_update_uses_recent_cache(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -46,7 +48,7 @@ class UpdateCheckTests(unittest.TestCase):
                 json.dumps(
                     {
                         "checked_at": "2026-04-11T12:00:00Z",
-                        "latest_version": "26.4.0",
+                        "latest_version": "26.4.1",
                         "repo_url": "https://github.com/Ezequiel135/Nexus-Agent.git",
                     }
                 ),
@@ -62,7 +64,7 @@ class UpdateCheckTests(unittest.TestCase):
                 info = check_for_update("26.3.1", "https://github.com/Ezequiel135/Nexus-Agent.git")
 
             self.assertTrue(info.update_available)
-            self.assertEqual(info.latest_version, "26.4.0")
+            self.assertEqual(info.latest_version, "26.4.1")
 
 
 if __name__ == "__main__":

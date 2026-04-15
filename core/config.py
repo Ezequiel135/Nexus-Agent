@@ -13,6 +13,8 @@ KNOWN_PROVIDERS = ("OpenAI", "Anthropic", "Google", "Ollama", "Groq", "Custom")
 KNOWN_REMOTE_CHANNELS = ("telegram", "whatsapp")
 KNOWN_RUNTIME_MODES = ("online", "hybrid", "offline")
 KNOWN_EXECUTION_PROFILES = ("quick", "planned")
+DEFAULT_OLLAMA_BASE_URL = "http://127.0.0.1:11434"
+LOCAL_API_KEY_PLACEHOLDER = "local"
 RUNTIME_ENV_KEYS = (
     "OPENAI_API_KEY",
     "OPENAI_BASE_URL",
@@ -54,12 +56,28 @@ class NexusAccount:
         provider = normalize_provider(self.provider)
         return provider == "Ollama" or is_loopback_url(self.base_url)
 
+    @property
+    def resolved_model_name(self) -> str:
+        model_name = self.model_name.strip()
+        if not model_name:
+            return ""
+        if normalize_provider(self.provider) == "Ollama" and "/" not in model_name:
+            return f"ollama/{model_name}"
+        return model_name
+
     def completion_kwargs(self) -> dict[str, str]:
         kwargs: dict[str, str] = {}
-        if self.api_key:
-            kwargs["api_key"] = self.api_key
-        if self.base_url:
-            kwargs["base_url"] = self.base_url
+        provider = normalize_provider(self.provider)
+        api_key = self.api_key.strip()
+        base_url = self.base_url.strip()
+        if provider == "Ollama" and not base_url:
+            base_url = DEFAULT_OLLAMA_BASE_URL
+        if api_key:
+            kwargs["api_key"] = api_key
+        elif self.is_local_runtime:
+            kwargs["api_key"] = LOCAL_API_KEY_PLACEHOLDER
+        if base_url:
+            kwargs["base_url"] = base_url
         if self.is_custom and self.custom_provider:
             kwargs["custom_llm_provider"] = self.custom_provider.strip()
         return kwargs
@@ -150,7 +168,7 @@ class NexusConfig:
     @property
     def model_name(self) -> str:
         account = self.active_account
-        return account.model_name if account else ""
+        return account.resolved_model_name if account else ""
 
     @property
     def base_url(self) -> str:
@@ -214,7 +232,9 @@ class NexusConfig:
 
         provider = normalize_provider(account.provider).lower()
         if provider == "openai":
-            os.environ["OPENAI_API_KEY"] = account.api_key
+            os.environ["OPENAI_API_KEY"] = account.api_key or (
+                LOCAL_API_KEY_PLACEHOLDER if account.is_local_runtime else ""
+            )
             if account.base_url:
                 os.environ["OPENAI_BASE_URL"] = account.base_url
         elif provider == "anthropic":
@@ -224,18 +244,20 @@ class NexusConfig:
         elif provider == "groq":
             os.environ["GROQ_API_KEY"] = account.api_key
         elif provider == "ollama":
-            os.environ["OLLAMA_API_KEY"] = account.api_key or "local"
-            if account.base_url:
-                os.environ["OPENAI_BASE_URL"] = account.base_url
+            os.environ["OLLAMA_API_KEY"] = account.api_key or LOCAL_API_KEY_PLACEHOLDER
+            os.environ["OPENAI_API_KEY"] = account.api_key or LOCAL_API_KEY_PLACEHOLDER
+            os.environ["OPENAI_BASE_URL"] = account.base_url or DEFAULT_OLLAMA_BASE_URL
         else:
             if account.api_key:
                 os.environ["OPENAI_API_KEY"] = account.api_key
+            elif account.is_local_runtime:
+                os.environ["OPENAI_API_KEY"] = LOCAL_API_KEY_PLACEHOLDER
             if account.base_url:
                 os.environ["OPENAI_BASE_URL"] = account.base_url
             if account.custom_provider:
                 os.environ["NEXUS_CUSTOM_PROVIDER"] = account.custom_provider
 
-        os.environ["NEXUS_MODEL_NAME"] = account.model_name
+        os.environ["NEXUS_MODEL_NAME"] = account.resolved_model_name
         os.environ["NEXUS_PROVIDER"] = account.provider_label
         os.environ["NEXUS_RUNTIME_MODE"] = self.runtime_mode
         os.environ["NEXUS_ACCOUNT_NAME"] = account.name

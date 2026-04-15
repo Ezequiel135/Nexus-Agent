@@ -10,21 +10,20 @@ O formato segue a ideia de:
 
 ## [Unreleased]
 
+## [26.4.1] - 2026-04-15
+
 ### Added
-- Arquivo `CHANGELOG.md` para registrar releases, correções e melhorias do projeto.
-- Teste `tests/test_nexus_ui.py` para garantir que a `NexusApp` monta corretamente.
+- Teste `tests/test_local_runtime_config.py` para cobrir runtime local, placeholder de API key e normalizacao de modelo no Ollama.
 
 ### Changed
-- Fluxo de primeira execução da CLI ficou mais profissional, com onboarding automático após o setup.
-- O runtime do LLM agora faz retry automático em erro de cota/rate limit por até 10 tentativas.
-- O backoff de retry da API agora é progressivo: 10s, 20s, 30s e assim por diante.
-- O `README.md` foi atualizado para refletir as correções recentes e o comportamento de retry da API.
+- O `README.md` foi reescrito para focar em visao geral do projeto, instalacao, configuracao e uso.
+- O fluxo de correcao voltou a registrar release de bugfix com versao e entrada propria no `CHANGELOG.md`.
 
 ### Fixed
-- Corrigidos os imports/bootstraps para executar `main.py` e `ui/setup_cli.py` fora da raiz do projeto.
-- Corrigido o layout inicial da `SetupApp`, evitando campos vazios e renderização quebrada no primeiro load.
-- Corrigido o CSS inválido da `NexusApp` que causava falha no parser do Textual.
-- Corrigido o mount da `NexusApp` ao aceitar `id=` em `GreenLightBar`.
+- Corrigida a configuracao de runtime local/OpenAI-compatible para nao falhar quando o endpoint e localhost sem API key real.
+- Corrigida a configuracao do provider `Ollama`, com `base_url` padrao e normalizacao de modelo para chamadas via LiteLLM.
+- Corrigida a inicializacao do setup plain e da CLI plain quando `rich` ainda nao esta instalado no ambiente.
+- Corrigido o instalador para tentar caminhos de fallback melhores e exibir log util quando a instalacao de dependencias falha.
 
 ## [26.4.0] - 2026-04-11
 

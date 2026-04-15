@@ -7,7 +7,7 @@ from core.version import APP_VERSION, bump_bugfix, bump_feature, initial_version
 
 class VersionTests(unittest.TestCase):
     def test_app_version_matches_release(self) -> None:
-        self.assertEqual(APP_VERSION, "26.4.0")
+        self.assertEqual(APP_VERSION, "26.4.1")
 
     def test_initial_version_for_year(self) -> None:
         self.assertEqual(initial_version_for_year(2026), "26.1.0")

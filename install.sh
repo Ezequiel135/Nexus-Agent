@@ -18,7 +18,7 @@ YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-echo -e "${CYAN}╔══ NEXUS AGENT INSTALLER 26.4.0 ══╗${NC}"
+echo -e "${CYAN}╔══ NEXUS AGENT INSTALLER 26.4.1 ══╗${NC}"
 echo -e "${CYAN}║  Criado por Ezequiel 135          ║${NC}"
 echo -e "${CYAN}╚═══════════════════════════════════╝${NC}"
 echo ""
@@ -138,10 +138,14 @@ fi
 
 echo -e "[3/5] Clonando Nexus-Agent..."
 rm -rf "${SRC_DIR}"
-if [ -n "${NEXUS_LOCAL_SRC:-}" ] && [ -d "${NEXUS_LOCAL_SRC}/.git" ]; then
+if [ -n "${NEXUS_LOCAL_SRC:-}" ] && { [ -d "${NEXUS_LOCAL_SRC}/.git" ] || [ -f "${NEXUS_LOCAL_SRC}/pyproject.toml" ] || [ -f "${NEXUS_LOCAL_SRC}/main.py" ]; }; then
     echo "  Usando fonte local de ${NEXUS_LOCAL_SRC}"
     cp -r "${NEXUS_LOCAL_SRC}" "${SRC_DIR}"
 else
+    if ! command -v git >/dev/null 2>&1; then
+        echo -e "${RED}ERRO:${NC} git nao encontrado para clonar o repositorio."
+        exit 1
+    fi
     echo "  Clonando de ${REPO_URL} ..."
     git clone --depth=1 "${REPO_URL}" "${SRC_DIR}" || {
         echo -e "${RED}ERRO:${NC} Clone falhou. Verifique sua conexao ou token."
@@ -156,10 +160,21 @@ $PYTHON -m venv "${ENV_DIR}"
 "${ENV_DIR}/bin/pip" install --upgrade pip setuptools wheel
 
 echo -e "[5/5] Instalando dependencias Python..."
-if ! "${ENV_DIR}/bin/pip" install -r "${SRC_DIR}/requirements.txt" 2>/dev/null; then
-    echo -e "${YELLOW}[WARN]${NC} requirements.txt completo falhou. Instalando conjunto minimo..."
-    "${ENV_DIR}/bin/pip" install rich litellm requests python-dotenv psutil textual nbformat nbclient ipykernel
+PIP_LOG="$(mktemp)"
+if ! "${ENV_DIR}/bin/pip" install -r "${SRC_DIR}/requirements.txt" >"${PIP_LOG}" 2>&1; then
+    echo -e "${YELLOW}[WARN]${NC} requirements.txt falhou. Tentando instalar o projeto pelo pyproject..."
+    if ! "${ENV_DIR}/bin/pip" install "${SRC_DIR}" >>"${PIP_LOG}" 2>&1; then
+        echo -e "${YELLOW}[WARN]${NC} Instalacao completa falhou. Tentando conjunto minimo..."
+        if ! "${ENV_DIR}/bin/pip" install rich litellm requests python-dotenv psutil textual nbformat nbclient ipykernel >>"${PIP_LOG}" 2>&1; then
+            echo -e "${RED}ERRO:${NC} Nao foi possivel instalar as dependencias Python."
+            echo "  Log do pip:"
+            sed -n '1,160p' "${PIP_LOG}"
+            rm -f "${PIP_LOG}"
+            exit 1
+        fi
+    fi
 fi
+rm -f "${PIP_LOG}"
 
 echo ""
 echo -e "[6/6] Criando wrapper local..."
@@ -167,7 +182,7 @@ echo -e "[6/6] Criando wrapper local..."
 # Wrapper em ~/.local/bin (garante prioridade sobre /usr/local/bin)
 cat > "${WRAPPER_PATH}" <<'EOF'
 #!/usr/bin/env bash
-# NEXUS AGENT WRAPPER 26.4.0
+# NEXUS AGENT WRAPPER 26.4.1
 export NEXUS_HOME="${HOME}/.nexus"
 exec "${NEXUS_HOME}/env/bin/python" "${NEXUS_HOME}/src/main.py" "$@"
 EOF
@@ -178,7 +193,7 @@ if [ "${NEXUS_INSTALL_GLOBAL:-0}" = "1" ]; then
     echo "  Criando wrapper global em ${GLOBAL_WRAPPER_PATH}..."
     sudo tee "${GLOBAL_WRAPPER_PATH}" > /dev/null <<'EOF'
 #!/usr/bin/env bash
-# NEXUS AGENT WRAPPER 26.4.0 — global
+# NEXUS AGENT WRAPPER 26.4.1 — global
 export NEXUS_HOME="${HOME}/.nexus"
 exec "${NEXUS_HOME}/env/bin/python" "${NEXUS_HOME}/src/main.py" "$@"
 EOF
@@ -203,7 +218,7 @@ fi
 
 echo ""
 echo -e "${GREEN}╔═══ INSTALACAO CONCLUIDA ═══╗${NC}"
-echo -e "${GREEN}║  NEXUS AGENT 26.4.0        ║${NC}"
+echo -e "${GREEN}║  NEXUS AGENT 26.4.1        ║${NC}"
 echo -e "${GREEN}╚════════════════════════════╝${NC}"
 echo ""
 echo -e "${CYAN}Como usar:${NC}"

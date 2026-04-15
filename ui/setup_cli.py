@@ -9,8 +9,21 @@ if PROJECT_ROOT not in sys.path:
 
 import getpass
 
-from rich.console import Console
-from rich.panel import Panel
+try:
+    from rich.console import Console
+    from rich.panel import Panel
+except ImportError:
+    class Console:  # type: ignore[override]
+        def print(self, *args, **kwargs) -> None:
+            print(*args)
+
+        def input(self, prompt: str = "") -> str:
+            return input(prompt)
+
+    class Panel:  # type: ignore[override]
+        @staticmethod
+        def fit(renderable, *args, **kwargs):
+            return str(renderable)
 
 from core.config import (
     KNOWN_PROVIDERS,

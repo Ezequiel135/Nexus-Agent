@@ -46,9 +46,9 @@ class TranscriptTests(unittest.TestCase):
         self.assertIn("1. Abrir o app [GREEN]", line)
 
     def test_format_activity_log_for_update_notice(self) -> None:
-        line = format_activity_log(transcript_event("update_available", latest_version="26.4.0", command="nexus update"))
+        line = format_activity_log(transcript_event("update_available", latest_version="26.4.1", command="nexus update"))
 
-        self.assertIn("Atualizacao disponivel: 26.4.0", line)
+        self.assertIn("Atualizacao disponivel: 26.4.1", line)
         self.assertIn("`nexus update`", line)
 
     def test_format_activity_log_for_command_result_event(self) -> None:
