@@ -10,6 +10,7 @@ GLOBAL_WRAPPER_PATH="/usr/local/bin/nexus"
 DEFAULT_REPO_URL="https://github.com/Ezequiel135/Nexus-Agent.git"
 REPO_URL="${NEXUS_REPO_URL:-${DEFAULT_REPO_URL}}"
 AUTO_INSTALL_DEPS="${NEXUS_AUTO_INSTALL_DEPS:-1}"
+INSTALLER_VERSION="26.4.2"
 
 # Cores
 GREEN='\033[0;32m'
@@ -18,10 +19,67 @@ YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-echo -e "${CYAN}╔══ NEXUS AGENT INSTALLER 26.4.1 ══╗${NC}"
+echo -e "${CYAN}╔══ NEXUS AGENT INSTALLER ${INSTALLER_VERSION} ══╗${NC}"
 echo -e "${CYAN}║  Criado por Ezequiel 135          ║${NC}"
 echo -e "${CYAN}╚═══════════════════════════════════╝${NC}"
 echo ""
+
+# Helpers
+append_unique_dep() {
+    local candidate="$1"
+    local dep
+    for dep in "${MISSING_DEPS[@]:-}"; do
+        if [ "$dep" = "$candidate" ]; then
+            return 0
+        fi
+    done
+    MISSING_DEPS+=("$candidate")
+}
+
+python_can_create_venv() {
+    local check_dir
+    check_dir="$(mktemp -d "${TMPDIR:-/tmp}/nexus-venv-check.XXXXXX")"
+    if "$PYTHON" -m venv "$check_dir" >/dev/null 2>&1; then
+        rm -rf "$check_dir"
+        return 0
+    fi
+    rm -rf "$check_dir"
+    return 1
+}
+
+apt_get_update_official_only() {
+    local -a apt_opts
+    apt_opts=(-o Dir::Etc::sourceparts=/dev/null -o APT::Get::List-Cleanup=0)
+    if [ -f /etc/apt/sources.list ]; then
+        apt_opts=(-o Dir::Etc::sourcelist=/etc/apt/sources.list "${apt_opts[@]}")
+    fi
+    sudo apt-get update "${apt_opts[@]}"
+}
+
+apt_get_install_official_only() {
+    local -a apt_opts
+    apt_opts=(-o Dir::Etc::sourceparts=/dev/null)
+    if [ -f /etc/apt/sources.list ]; then
+        apt_opts=(-o Dir::Etc::sourcelist=/etc/apt/sources.list "${apt_opts[@]}")
+    fi
+    sudo apt-get install -y "${apt_opts[@]}" "$@"
+}
+
+attempt_auto_install_deps() {
+    if sudo apt-get update; then
+        sudo apt-get install -y "${MISSING_DEPS[@]}"
+        return $?
+    fi
+
+    echo -e "${YELLOW}[WARN]${NC} 'apt-get update' falhou. Tentando novamente apenas com repositorios oficiais..."
+    if apt_get_update_official_only; then
+        apt_get_install_official_only "${MISSING_DEPS[@]}"
+        return $?
+    fi
+
+    echo -e "${YELLOW}[WARN]${NC} Nao foi possivel atualizar indices do apt. Tentando instalar com o cache ja existente..."
+    sudo apt-get install -y "${MISSING_DEPS[@]}"
+}
 
 # OS Detection
 OS=""
@@ -65,6 +123,7 @@ echo -e "${GREEN}[Python]${NC} $PYTHON — versao $PY_VERSION"
 
 # Checa 3.10+
 IFS='.' read -r MAJOR MINOR _ <<< "$PY_VERSION"
+PYTHON_VENV_PACKAGE="python${MAJOR}.${MINOR}-venv"
 if [ "$MAJOR" -lt 3 ] || ([ "$MAJOR" -eq 3 ] && [ "$MINOR" -lt 10 ]); then
     echo -e "${RED}ERRO:${NC} Python 3.10+ necessario. Versao detectada: $PY_VERSION"
     exit 1
@@ -76,23 +135,33 @@ echo -e "[1/5] Verificando dependencias de sistema..."
 if [ "$OS" = "linux" ]; then
     MISSING_DEPS=()
     if command -v dpkg >/dev/null 2>&1; then
-        for dep in git python3-venv python3-pip scrot xdotool tesseract-ocr; do
+        for dep in git python3-pip scrot xdotool tesseract-ocr; do
             if ! dpkg -s "$dep" >/dev/null 2>&1; then
-                MISSING_DEPS+=("$dep")
+                append_unique_dep "$dep"
             fi
         done
+        if ! dpkg -s "python3-venv" >/dev/null 2>&1; then
+            append_unique_dep "python3-venv"
+        fi
+        if ! dpkg -s "${PYTHON_VENV_PACKAGE}" >/dev/null 2>&1; then
+            append_unique_dep "${PYTHON_VENV_PACKAGE}"
+        fi
     else
         for dep in git scrot xdotool tesseract; do
             if ! command -v "$dep" >/dev/null 2>&1; then
-                MISSING_DEPS+=("$dep")
+                append_unique_dep "$dep"
             fi
         done
+    fi
+    if ! python_can_create_venv; then
+        append_unique_dep "python3-venv"
+        append_unique_dep "${PYTHON_VENV_PACKAGE}"
     fi
     if [ ${#MISSING_DEPS[@]} -gt 0 ]; then
         echo -e "${YELLOW}Aviso:${NC} Dependencias faltando: ${MISSING_DEPS[*]}"
         if [ "${AUTO_INSTALL_DEPS}" = "1" ] && command -v apt-get >/dev/null 2>&1 && command -v sudo >/dev/null 2>&1; then
             echo "  Tentando instalar automaticamente com sudo apt-get..."
-            if sudo apt-get update && sudo apt-get install -y "${MISSING_DEPS[@]}"; then
+            if attempt_auto_install_deps; then
                 echo -e "${GREEN}[OK]${NC} Dependencias do sistema instaladas automaticamente."
             else
                 echo -e "${YELLOW}[WARN]${NC} Instalacao automatica falhou."
@@ -116,6 +185,14 @@ if [ "$OS" = "linux" ]; then
                 exit 1
             fi
         fi
+    fi
+    if ! python_can_create_venv; then
+        echo -e "${RED}ERRO:${NC} O Python detectado ainda nao consegue criar ambientes virtuais."
+        if command -v apt-get >/dev/null 2>&1; then
+            echo "  Instale manualmente com: sudo apt install python3-venv ${PYTHON_VENV_PACKAGE}"
+        fi
+        echo "  Depois rode novamente: ./install.sh"
+        exit 1
     fi
 fi
 
@@ -149,7 +226,7 @@ else
     echo "  Clonando de ${REPO_URL} ..."
     git clone --depth=1 "${REPO_URL}" "${SRC_DIR}" || {
         echo -e "${RED}ERRO:${NC} Clone falhou. Verifique sua conexao ou token."
-        echo "  Dica: use NEXUS_REPO_URL='https://TOKEN@github.com/...'"
+        echo "  Dica: autentique o git/gh localmente ou use NEXUS_LOCAL_SRC=/caminho/do/repositorio"
         exit 1
     }
 fi
@@ -182,7 +259,7 @@ echo -e "[6/6] Criando wrapper local..."
 # Wrapper em ~/.local/bin (garante prioridade sobre /usr/local/bin)
 cat > "${WRAPPER_PATH}" <<'EOF'
 #!/usr/bin/env bash
-# NEXUS AGENT WRAPPER 26.4.1
+# NEXUS AGENT WRAPPER 26.4.2
 export NEXUS_HOME="${HOME}/.nexus"
 exec "${NEXUS_HOME}/env/bin/python" "${NEXUS_HOME}/src/main.py" "$@"
 EOF
@@ -193,7 +270,7 @@ if [ "${NEXUS_INSTALL_GLOBAL:-0}" = "1" ]; then
     echo "  Criando wrapper global em ${GLOBAL_WRAPPER_PATH}..."
     sudo tee "${GLOBAL_WRAPPER_PATH}" > /dev/null <<'EOF'
 #!/usr/bin/env bash
-# NEXUS AGENT WRAPPER 26.4.1 — global
+# NEXUS AGENT WRAPPER 26.4.2 — global
 export NEXUS_HOME="${HOME}/.nexus"
 exec "${NEXUS_HOME}/env/bin/python" "${NEXUS_HOME}/src/main.py" "$@"
 EOF
@@ -218,7 +295,7 @@ fi
 
 echo ""
 echo -e "${GREEN}╔═══ INSTALACAO CONCLUIDA ═══╗${NC}"
-echo -e "${GREEN}║  NEXUS AGENT 26.4.1        ║${NC}"
+echo -e "${GREEN}║  NEXUS AGENT 26.4.2        ║${NC}"
 echo -e "${GREEN}╚════════════════════════════╝${NC}"
 echo ""
 echo -e "${CYAN}Como usar:${NC}"

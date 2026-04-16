@@ -10,6 +10,19 @@ O formato segue a ideia de:
 
 ## [Unreleased]
 
+## [26.4.2] - 2026-04-15
+
+### Added
+- Teste `tests/test_install_script.py` para cobrir o fallback do `install.sh` quando `apt-get update` falha por repositório de terceiro e o Python precisa do pacote versionado `python3.x-venv`.
+
+### Changed
+- O `install.sh` agora detecta o pacote `python3.x-venv` correspondente ao Python em uso e tenta instalar apenas com repositórios oficiais do sistema quando um PPA/repositório externo quebra o `apt update`.
+- A mensagem de erro do clone passou a orientar autenticação local do `git`/`gh`, em vez de sugerir token embutido na URL.
+
+### Fixed
+- Corrigida a instalação automática em Ubuntu/Zorin quando `python3-venv` sozinho não basta e o ambiente precisa de `python3.10-venv` ou equivalente.
+- Corrigida a instalação em máquinas com repositório de terceiros quebrado, como o caso de chave GPG ausente do Brave, sem exigir mexer no projeto manualmente.
+
 ## [26.4.1] - 2026-04-15
 
 ### Added

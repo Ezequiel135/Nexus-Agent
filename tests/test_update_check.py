@@ -24,7 +24,7 @@ class UpdateCheckTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             cache_path = Path(tmpdir) / "update_check.json"
             fake_response = SimpleNamespace(
-                text='APP_VERSION = "26.4.1"\n',
+                text='APP_VERSION = "26.4.2"\n',
                 raise_for_status=lambda: None,
             )
             fake_requests = SimpleNamespace(get=lambda *args, **kwargs: fake_response)
@@ -36,10 +36,10 @@ class UpdateCheckTests(unittest.TestCase):
 
             self.assertTrue(info.checked)
             self.assertTrue(info.update_available)
-            self.assertEqual(info.latest_version, "26.4.1")
+            self.assertEqual(info.latest_version, "26.4.2")
             self.assertTrue(cache_path.exists())
             payload = json.loads(cache_path.read_text(encoding="utf-8"))
-            self.assertEqual(payload["latest_version"], "26.4.1")
+            self.assertEqual(payload["latest_version"], "26.4.2")
 
     def test_check_for_update_uses_recent_cache(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -48,7 +48,7 @@ class UpdateCheckTests(unittest.TestCase):
                 json.dumps(
                     {
                         "checked_at": "2026-04-11T12:00:00Z",
-                        "latest_version": "26.4.1",
+                        "latest_version": "26.4.2",
                         "repo_url": "https://github.com/Ezequiel135/Nexus-Agent.git",
                     }
                 ),
@@ -64,7 +64,7 @@ class UpdateCheckTests(unittest.TestCase):
                 info = check_for_update("26.3.1", "https://github.com/Ezequiel135/Nexus-Agent.git")
 
             self.assertTrue(info.update_available)
-            self.assertEqual(info.latest_version, "26.4.1")
+            self.assertEqual(info.latest_version, "26.4.2")
 
 
 if __name__ == "__main__":

@@ -45,6 +45,8 @@ Depois abra um novo terminal e execute:
 nexus
 ```
 
+No Linux com `apt`, o instalador tenta baixar dependencias automaticamente e, se um repositório de terceiro quebrar o `apt update`, ele refaz a tentativa usando só os repositórios oficiais do sistema.
+
 ### Execucao direta no projeto
 
 ```bash
@@ -246,6 +248,18 @@ Instale:
 
 ```bash
 sudo apt install scrot xdotool tesseract-ocr
+```
+
+### `install.sh` falha com `NO_PUBKEY` ou erro em repositório de terceiro
+
+As releases novas do instalador tentam ignorar PPAs/repositórios externos quebrados para instalar apenas o que o Nexus precisa. Se a sua máquina ainda bloquear o `apt`, corrija ou desative o repositório com erro e rode o instalador novamente.
+
+### `ensurepip is not available` ao criar o ambiente virtual
+
+No Ubuntu/Zorin, instale o pacote genérico e o pacote versionado do seu Python. Exemplo para Python 3.10:
+
+```bash
+sudo apt install python3-venv python3.10-venv python3-pip
 ```
 
 ## Licenca
