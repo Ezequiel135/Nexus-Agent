@@ -25,6 +25,8 @@ from .safeguards import (
 )
 from .tool_registry import ToolRegistry
 from .transcript import transcript_event
+from .system_context import host_snapshot
+from .web_lookup import search_web
 
 COMMAND_POLL_INTERVAL_SECONDS = 0.1
 DEFAULT_COMMAND_TIMEOUT_SECONDS = 120
@@ -171,6 +173,31 @@ class AcoesAgente(ToolRegistry):
                 "required": ["acao"],
             },
             func=self.consultar_mcp,
+        )
+        self.register(
+            name="consultar_web",
+            description=(
+                "Busca referencias read-only na web, util para documentacao, comandos ausentes e paginas oficiais. "
+                "Use apenas quando a informacao nao estiver disponivel localmente."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "consulta": {"type": "string"},
+                    "max_results": {"type": "integer"},
+                    "timeout": {"type": "integer"},
+                },
+                "required": ["consulta"],
+            },
+            func=self.consultar_web,
+        )
+        self.register(
+            name="inspecionar_sistema",
+            description=(
+                "Inspeciona o host local e retorna SO detectado, comandos disponiveis, comandos de controle, browsers e browser padrao."
+            ),
+            parameters={"type": "object", "properties": {}},
+            func=self.inspecionar_sistema,
         )
         self.register(
             name="gerenciar_notebooks",
@@ -639,6 +666,28 @@ class AcoesAgente(ToolRegistry):
             payload = call_mcp_tool(self.config, servidor, ferramenta, argumentos or {})
             return self._json({"ok": True, **payload})
         raise ValueError(f"Acao MCP desconhecida: {acao}")
+
+    def consultar_web(self, consulta: str, max_results: int | None = None, timeout: int | None = None) -> str:
+        try:
+            results = search_web(
+                consulta,
+                max_results=max_results or 5,
+                timeout=float(timeout or 5),
+            )
+        except Exception as exc:
+            return self._json({"ok": False, "erro": f"Falha na busca web: {exc}"})
+        return self._json(
+            {
+                "ok": True,
+                "consulta": " ".join((consulta or "").split()),
+                "results": results,
+            }
+        )
+
+    def inspecionar_sistema(self) -> str:
+        payload = host_snapshot()
+        self._emit(f"SISTEMA: {payload['summary']}")
+        return self._json({"ok": True, **payload})
 
     def gerenciar_notebooks(
         self,

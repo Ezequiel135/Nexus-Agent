@@ -10,6 +10,22 @@ O formato segue a ideia de:
 
 ## [Unreleased]
 
+## [26.4.3] - 2026-04-16
+
+### Added
+- Tool `inspecionar_sistema` com snapshot do host, comandos de controle disponíveis, browsers detectados e navegador padrão.
+- Suporte bilíngue PT-BR/EN com preferência configurável por `response_language` e comandos `/language auto|pt|en`.
+- Testes para resposta local imediata em smalltalk e para validar que o `install.sh` não imprime mais sequências ANSI cruas na mensagem final.
+
+### Changed
+- O runtime agora injeta contexto do host no prompt do agente, incluindo SO detectado, comandos de controle e navegador padrão.
+- Conversas comuns sem intenção de execução passaram a usar resposta direta, sem tool-calls e com limite menor de tokens.
+- Sessões privilegiadas passaram a reconhecer mais comandos de controle do sistema em Linux, macOS e Windows.
+
+### Fixed
+- Corrigida a mensagem final do `install.sh`, que mostrava `\033[...]` literal em vez de aplicar cor nos comandos destacados.
+- Corrigido o comportamento do agente para não tratar saudações e conversa simples como tarefas longas com planejamento desnecessário.
+
 ## [26.4.2] - 2026-04-15
 
 ### Added

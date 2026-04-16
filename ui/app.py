@@ -28,6 +28,7 @@ from core.config import (
     create_password_hash,
     make_account,
     make_agent,
+    normalize_response_language,
     normalize_provider,
     normalize_runtime_mode,
     normalize_execution_profile,
@@ -912,8 +913,9 @@ class NexusApp(App[None]):
                     [
                         "**Comandos locais**",
                         "- `/help` ajuda",
-                        "- `/settings` runtime/dry-run/auto-plan",
+                        "- `/settings` runtime/idioma/dry-run/auto-plan",
                         "- `/profile quick|planned` alterna Dia a dia e Profissional",
+                        "- `/language auto|pt|en` define idioma de resposta",
                         "- `/launcher` reabre a tela inicial",
                         "- `/plan on|off` liga/desliga preview automatico",
                         "- `/dry-run on|off` liga/desliga dry-run",
@@ -936,6 +938,7 @@ class NexusApp(App[None]):
                         f"- state={snap.state}",
                         f"- runtime={self.bridge.config.runtime_mode}",
                         f"- profile={profile_label(getattr(self.bridge.config, 'execution_profile', 'planned'))}",
+                        f"- response_language={getattr(self.bridge.config, 'response_language', 'auto')}",
                         f"- dry_run={self.bridge.config.dry_run}",
                         f"- plan_before_execute={self.bridge.config.plan_before_execute}",
                         f"- privilege={self.bridge.actions.privilege_status().summary()}",
@@ -953,6 +956,7 @@ class NexusApp(App[None]):
                         "**Settings**",
                         f"- runtime={self.bridge.config.runtime_mode}",
                         f"- execution_profile={getattr(self.bridge.config, 'execution_profile', 'planned')}",
+                        f"- response_language={getattr(self.bridge.config, 'response_language', 'auto')}",
                         f"- dry_run={self.bridge.config.dry_run}",
                         f"- plan_before_execute={self.bridge.config.plan_before_execute}",
                         f"- llm_cache_enabled={self.bridge.config.llm_cache_enabled}",
@@ -987,6 +991,13 @@ class NexusApp(App[None]):
         if command.startswith("/profile "):
             value = command.split(" ", 1)[1].strip()
             self._apply_profile_and_enter(value)
+            return
+        if command.startswith("/language "):
+            value = command.split(" ", 1)[1].strip()
+            language = normalize_response_language(value)
+            self.bridge.config.response_language = language
+            save_config(self.bridge.config)
+            self._write_log(f"response_language={language}")
             return
         if command.startswith("/dry-run "):
             value = command.split(" ", 1)[1].strip()

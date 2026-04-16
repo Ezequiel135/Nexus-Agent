@@ -67,6 +67,12 @@ exit 0
 """,
             )
             self._write_executable(
+                fakebin / "dpkg",
+                """#!/usr/bin/env bash
+exit 0
+""",
+            )
+            self._write_executable(
                 fakebin / "python3",
                 f"""#!/usr/bin/env bash
 set -euo pipefail
@@ -122,6 +128,69 @@ exec "$REAL_PYTHON" "$@"
             self.assertIn("Dir::Etc::sourceparts=/dev/null", apt_log)
             self.assertIn(python_version_pkg, apt_log)
             self.assertTrue((home / ".nexus" / "env" / "bin" / "pip").exists())
+
+    def test_final_instructions_do_not_print_raw_ansi_escape_sequences(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            home = Path(tmpdir) / "home"
+            fakebin = Path(tmpdir) / "fakebin"
+            source = Path(tmpdir) / "source"
+            home.mkdir()
+            fakebin.mkdir()
+            source.mkdir()
+            (source / "main.py").write_text("print('nexus test')\n", encoding="utf-8")
+            (source / "requirements.txt").write_text("", encoding="utf-8")
+            (home / ".bashrc").write_text("", encoding="utf-8")
+
+            real_python = sys.executable
+
+            self._write_executable(
+                fakebin / "python3",
+                f"""#!/usr/bin/env bash
+set -euo pipefail
+REAL_PYTHON="{real_python}"
+if [ "${{1:-}}" = "-c" ]; then
+    exec "$REAL_PYTHON" "$@"
+fi
+if [ "${{1:-}}" = "-m" ] && [ "${{2:-}}" = "venv" ]; then
+    target="${{3:-}}"
+    mkdir -p "$target/bin"
+    cat > "$target/bin/pip" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+    chmod +x "$target/bin/pip"
+    cat > "$target/bin/python" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+    chmod +x "$target/bin/python"
+    exit 0
+fi
+exec "$REAL_PYTHON" "$@"
+""",
+            )
+
+            env = os.environ.copy()
+            env.update(
+                {
+                    "HOME": str(home),
+                    "PATH": f"{fakebin}{os.pathsep}{env['PATH']}",
+                    "NEXUS_LOCAL_SRC": str(source),
+                    "NEXUS_AUTO_INSTALL_DEPS": "0",
+                    "OSTYPE": "linux-gnu",
+                }
+            )
+            result = subprocess.run(
+                ["bash", str(INSTALL_SCRIPT)],
+                cwd=str(REPO_ROOT),
+                env=env,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+            self.assertIn("source ~/.bashrc", result.stdout)
+            self.assertNotIn(r"\033[", result.stdout)
 
     def _write_executable(self, path: Path, content: str) -> None:
         path.write_text(textwrap.dedent(content), encoding="utf-8")

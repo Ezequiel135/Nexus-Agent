@@ -13,6 +13,7 @@ KNOWN_PROVIDERS = ("OpenAI", "Anthropic", "Google", "Ollama", "Groq", "Custom")
 KNOWN_REMOTE_CHANNELS = ("telegram", "whatsapp")
 KNOWN_RUNTIME_MODES = ("online", "hybrid", "offline")
 KNOWN_EXECUTION_PROFILES = ("quick", "planned")
+KNOWN_RESPONSE_LANGUAGES = ("auto", "pt-BR", "en")
 DEFAULT_OLLAMA_BASE_URL = "http://127.0.0.1:11434"
 LOCAL_API_KEY_PLACEHOLDER = "local"
 RUNTIME_ENV_KEYS = (
@@ -28,6 +29,7 @@ RUNTIME_ENV_KEYS = (
     "NEXUS_AGENT_NAME",
     "NEXUS_CUSTOM_PROVIDER",
     "NEXUS_RUNTIME_MODE",
+    "NEXUS_RESPONSE_LANGUAGE",
 )
 
 
@@ -117,6 +119,7 @@ class NexusConfig:
     ui_mode: str = "auto"
     runtime_mode: str = "hybrid"
     execution_profile: str = "planned"
+    response_language: str = "auto"
     plan_before_execute: bool = True
     dry_run: bool = True
     startup_probe: bool = False
@@ -260,6 +263,7 @@ class NexusConfig:
         os.environ["NEXUS_MODEL_NAME"] = account.resolved_model_name
         os.environ["NEXUS_PROVIDER"] = account.provider_label
         os.environ["NEXUS_RUNTIME_MODE"] = self.runtime_mode
+        os.environ["NEXUS_RESPONSE_LANGUAGE"] = normalize_response_language(self.response_language)
         os.environ["NEXUS_ACCOUNT_NAME"] = account.name
         if self.active_agent is not None:
             os.environ["NEXUS_AGENT_NAME"] = self.active_agent.name
@@ -323,6 +327,17 @@ def normalize_execution_profile(value: str | None) -> str:
     if normalized in {"planned", "professional", "profissional", "planejado"}:
         return "planned"
     return "planned"
+
+
+def normalize_response_language(value: str | None) -> str:
+    normalized = (value or "").strip().lower()
+    if normalized in {"", "auto", "automatic", "automatico", "automático"}:
+        return "auto"
+    if normalized in {"pt", "pt-br", "portuguese", "portugues", "português"}:
+        return "pt-BR"
+    if normalized in {"en", "en-us", "en-gb", "english", "ingles", "inglês"}:
+        return "en"
+    return "auto"
 
 
 def normalize_provider(value: str | None) -> str:
@@ -450,6 +465,7 @@ def build_initial_config(
     agent: NexusAgentProfile,
     runtime_mode: str = "hybrid",
     execution_profile: str = "planned",
+    response_language: str = "auto",
 ) -> NexusConfig:
     return NexusConfig(
         password_hash=password_hash,
@@ -457,6 +473,7 @@ def build_initial_config(
         ui_mode=normalize_ui_mode(ui_mode),
         runtime_mode=normalize_runtime_mode(runtime_mode),
         execution_profile=normalize_execution_profile(execution_profile),
+        response_language=normalize_response_language(response_language),
         accounts=[account],
         active_account_id=account.id,
         agents=[agent],
@@ -580,6 +597,7 @@ def normalize_config(config: NexusConfig) -> NexusConfig:
     config.ui_mode = normalize_ui_mode(config.ui_mode)
     config.runtime_mode = normalize_runtime_mode(config.runtime_mode)
     config.execution_profile = normalize_execution_profile(config.execution_profile)
+    config.response_language = normalize_response_language(getattr(config, "response_language", "auto"))
     config.max_tool_rounds = max(1, int(config.max_tool_rounds or 6))
     config.max_plan_steps = max(1, int(config.max_plan_steps or 8))
     config.max_history_messages = max(4, int(config.max_history_messages or 24))
@@ -667,6 +685,7 @@ def load_config() -> NexusConfig:
         ui_mode=payload.get("ui_mode", "auto"),
         runtime_mode=payload.get("runtime_mode", "hybrid"),
         execution_profile=payload.get("execution_profile", "planned"),
+        response_language=payload.get("response_language", "auto"),
         plan_before_execute=payload.get("plan_before_execute", True),
         dry_run=payload.get("dry_run", True),
         startup_probe=payload.get("startup_probe", False),

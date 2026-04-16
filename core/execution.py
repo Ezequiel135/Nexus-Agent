@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING
 
 from .config import normalize_execution_profile
@@ -27,20 +28,30 @@ PROFILE_SETTINGS = {
 
 VISUAL_SHORTCUT_HINTS = {
     "abrir",
+    "application",
     "apertar",
     "app",
     "aplicativo",
     "browser",
     "buscar",
+    "click",
     "clicar",
     "digitar",
     "janela",
+    "keyboard",
     "mouse",
-    "mostrar",
+    "open",
     "pesquisa",
     "programa",
-    "teclado",
+    "screen",
+    "search",
+    "show",
     "tela",
+    "teclado",
+    "type",
+    "window",
+    "browser",
+    "mostrar",
 }
 
 COMPLEX_HINTS = {
@@ -54,10 +65,18 @@ COMPLEX_HINTS = {
     "documentar",
     "instalar",
     "investigar",
+    "migrate",
     "migrar",
+    "organize",
     "organizar",
+    "process",
     "processar",
     "refatorar",
+    "refactor",
+    "update",
+    "atualizar",
+    "fix",
+    "corrigir",
 }
 
 RISK_HINTS = {
@@ -65,10 +84,13 @@ RISK_HINTS = {
     "chmod",
     "chown",
     "deletar",
+    "delete",
     "excluir",
-    "git",
+    "permissao",
     "permiss",
+    "permission",
     "remover",
+    "remove",
     "root",
     "sudo",
 }
@@ -77,11 +99,118 @@ PLAN_HINTS = {
     "como faria",
     "estrategia",
     "etapas",
+    "how would you",
+    "passo a passo",
+    "plan",
+    "como faria",
+    "estrategia",
+    "etapas",
     "passo a passo",
     "planeja",
     "planejar",
     "plano",
+    "steps",
+    "strategy",
 }
+
+EXECUTION_HINTS = VISUAL_SHORTCUT_HINTS | COMPLEX_HINTS | {
+    "ajustar",
+    "arrumar",
+    "atualiza",
+    "atualizar",
+    "change",
+    "consertar",
+    "create",
+    "criar",
+    "executa",
+    "executar",
+    "fix",
+    "install",
+    "move",
+    "mover",
+    "organize",
+    "run",
+    "set",
+    "trocar",
+    "update",
+}
+
+COMMAND_STYLE_PREFIXES = {
+    "apt",
+    "brew",
+    "chmod",
+    "chown",
+    "cp",
+    "docker",
+    "git",
+    "kubectl",
+    "ls",
+    "mkdir",
+    "mv",
+    "npm",
+    "npx",
+    "pip",
+    "pip3",
+    "python",
+    "python3",
+    "rm",
+    "sed",
+    "sudo",
+    "systemctl",
+    "touch",
+    "uv",
+    "winget",
+}
+
+CASUAL_EXACT_HINTS = {
+    "blz",
+    "boa noite",
+    "boa tarde",
+    "bom dia",
+    "e ai",
+    "e aí",
+    "hello",
+    "hey",
+    "hi",
+    "oi",
+    "oi nexus",
+    "ola",
+    "olá",
+    "thanks",
+    "thank you",
+    "tudo bem",
+    "valeu",
+}
+
+CASUAL_TOKENS = {
+    "ai",
+    "aí",
+    "blz",
+    "boa",
+    "bom",
+    "dia",
+    "e",
+    "hello",
+    "hey",
+    "hi",
+    "nexus",
+    "night",
+    "noite",
+    "oi",
+    "ola",
+    "olá",
+    "tarde",
+    "thanks",
+    "thank",
+    "thankyou",
+    "tudo",
+    "valeu",
+    "well",
+}
+
+QUESTION_LEADS = {"como", "what", "why", "when", "where", "who", "qual", "quais", "por", "porque"}
+GIT_RISK_PATTERN = re.compile(r"\bgit\s+(add|checkout|clean|clone|commit|merge|pull|push|rebase|reset|restore|switch)\b")
+PUNCT_RE = re.compile(r"[^\w\s./:+-]+", re.UNICODE)
 
 
 def profile_label(value: str | None) -> str:
@@ -108,49 +237,110 @@ def _lower_prompt(prompt: str) -> str:
     return " ".join((prompt or "").strip().lower().split())
 
 
-def prompt_is_risky(prompt: str) -> bool:
+def _normalized_prompt(prompt: str) -> str:
     lowered = _lower_prompt(prompt)
-    return any(token in lowered for token in RISK_HINTS)
+    return " ".join(PUNCT_RE.sub(" ", lowered).split())
+
+
+def prompt_is_smalltalk(prompt: str) -> bool:
+    normalized = _normalized_prompt(prompt)
+    if not normalized:
+        return False
+    if normalized in CASUAL_EXACT_HINTS:
+        return True
+    words = normalized.split()
+    return bool(words) and len(words) <= 4 and all(word in CASUAL_TOKENS for word in words)
+
+
+def prompt_looks_like_command(prompt: str) -> bool:
+    normalized = _normalized_prompt(prompt)
+    if not normalized:
+        return False
+    words = normalized.split()
+    if not words or words[0] in QUESTION_LEADS:
+        return False
+    if words[0] not in COMMAND_STYLE_PREFIXES:
+        return False
+    return len(words) <= 12 and "?" not in (prompt or "")
+
+
+def prompt_requests_execution(prompt: str) -> bool:
+    normalized = _normalized_prompt(prompt)
+    if not normalized or prompt_is_smalltalk(normalized):
+        return False
+    if prompt_looks_like_command(normalized):
+        return True
+    if any(token in normalized for token in EXECUTION_HINTS):
+        return True
+    return any(marker in normalized for marker in ("~/", "./", "/", ".py", ".sh", ".json"))
+
+
+def prompt_is_risky(prompt: str) -> bool:
+    normalized = _normalized_prompt(prompt)
+    if not normalized or prompt_is_smalltalk(normalized):
+        return False
+    if GIT_RISK_PATTERN.search(normalized):
+        return True
+    if not prompt_requests_execution(normalized):
+        return False
+    return any(token in normalized for token in RISK_HINTS)
 
 
 def prompt_explicitly_requests_plan(prompt: str) -> bool:
-    lowered = _lower_prompt(prompt)
-    return any(token in lowered for token in PLAN_HINTS)
+    normalized = _normalized_prompt(prompt)
+    return any(token in normalized for token in PLAN_HINTS)
 
 
 def prompt_is_visual_shortcut(prompt: str) -> bool:
-    lowered = _lower_prompt(prompt)
-    if not lowered:
+    normalized = _normalized_prompt(prompt)
+    if not normalized:
         return False
-    if any(token in lowered for token in VISUAL_SHORTCUT_HINTS):
+    if any(token in normalized for token in VISUAL_SHORTCUT_HINTS):
         return True
-    words = lowered.split()
-    return len(words) <= 8 and any(token in lowered for token in {"abrir", "app", "programa"})
+    words = normalized.split()
+    return len(words) <= 8 and any(token in normalized for token in {"abrir", "app", "open", "programa"})
 
 
 def prompt_is_complex(prompt: str) -> bool:
-    lowered = _lower_prompt(prompt)
-    words = lowered.split()
-    if prompt_is_risky(lowered):
+    normalized = _normalized_prompt(prompt)
+    words = normalized.split()
+    if prompt_is_risky(normalized):
         return True
-    if prompt_explicitly_requests_plan(lowered):
+    if prompt_explicitly_requests_plan(normalized):
         return True
-    if any(token in lowered for token in COMPLEX_HINTS):
+    if any(token in normalized for token in COMPLEX_HINTS):
         return True
-    if prompt_is_visual_shortcut(lowered):
+    if prompt_is_visual_shortcut(normalized):
+        return False
+    if not prompt_requests_execution(normalized):
         return False
     if len(words) >= 16:
         return True
-    connectors = sum(lowered.count(token) for token in (" depois ", " entao ", " em seguida ", " ao mesmo tempo "))
+    connectors = sum(
+        normalized.count(token)
+        for token in (
+            " depois ",
+            " entao ",
+            " em seguida ",
+            " ao mesmo tempo ",
+            " then ",
+            " after that ",
+            " next ",
+        )
+    )
     return connectors >= 2
 
 
 def should_preview_plan(config: "NexusConfig", prompt: str) -> bool:
     profile = normalize_execution_profile(getattr(config, "execution_profile", "planned"))
+    if prompt_is_smalltalk(prompt):
+        return False
     if prompt_explicitly_requests_plan(prompt):
         return True
     if prompt_is_risky(prompt):
         return True
+    if not prompt_requests_execution(prompt):
+        return False
     if profile == "quick":
         return False
     return bool(getattr(config, "plan_before_execute", True) and prompt_is_complex(prompt))

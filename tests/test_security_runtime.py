@@ -70,6 +70,17 @@ class SecurityRuntimeTests(unittest.TestCase):
         self.assertIn("offline", answer.lower())
         self.assertEqual(tool_logs, [])
 
+    def test_smalltalk_returns_immediate_local_reply(self) -> None:
+        config = make_config()
+        monitor = ActivityMonitor()
+        actions = AcoesAgente(config)
+        bridge = LiteLLMBridge(config, monitor, actions, export_env=False)
+
+        answer, tool_logs = bridge.chat([{"role": "user", "content": "oi"}])
+
+        self.assertIn("oi", answer.lower())
+        self.assertEqual(tool_logs, [])
+
     def test_delete_in_dry_run_only_previews(self) -> None:
         config = make_config()
         config.dry_run = True

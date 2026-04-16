@@ -46,6 +46,7 @@ from core.logging_utils import log_event
 from core.safeguards import blocked_examples, blocked_reasons
 from core.state import ActivityMonitor
 from core.parallel import ParallelAgentRunner
+from core.system_context import host_summary
 from core.version import APP_VERSION
 
 DEFAULT_WHATSAPP_GRAPH_VERSION = "v23.0"
@@ -215,6 +216,7 @@ def handle_doctor() -> int:
     print(f"stdin_tty={sys.stdin.isatty()}")
     print(f"stdout_tty={sys.stdout.isatty()}")
     print(f"shell={os.environ.get('SHELL') or os.environ.get('COMSPEC') or '-'}")
+    print(f"host_summary={host_summary()}")
     print(f"config_exists={config_exists()}")
     print(f"repo_file={NexusPaths.repo_path}")
     print(f"activity_file={NexusPaths.activity_path}")
@@ -227,6 +229,7 @@ def handle_doctor() -> int:
         active_agent = config.active_agent.name if config.active_agent else "-"
         print(
             f"runtime_mode={config.runtime_mode} execution_profile={getattr(config, 'execution_profile', 'planned')} "
+            f"response_language={getattr(config, 'response_language', 'auto')} "
             f"dry_run={config.dry_run} plan_before_execute={config.plan_before_execute}"
         )
         print(f"accounts={len(config.accounts)} active_account={active_account}")

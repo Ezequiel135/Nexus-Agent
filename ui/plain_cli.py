@@ -45,7 +45,7 @@ except ImportError:
             return "\n".join(lines)
 
 from core.actions import CancelledExecution
-from core.config import NexusPaths, save_config
+from core.config import NexusPaths, normalize_response_language, save_config
 from core.execution import apply_execution_profile, profile_label, should_preview_plan
 from core.llm import LiteLLMBridge
 from core.logging_utils import log_event
@@ -69,6 +69,7 @@ def format_session_summary(config) -> str:
         f"Conta ativa: {account_name}\n"
         f"Agente ativo: {agent_name}\n"
         f"Perfil: {profile_label(getattr(config, 'execution_profile', 'planned'))}\n"
+        f"Idioma: {getattr(config, 'response_language', 'auto')}\n"
         f"Provider: {provider}\n"
         f"Modelo: {model_name}\n"
         f"Workspace Nexus: {NexusPaths.base_dir}"
@@ -260,8 +261,9 @@ class PlainNexusCLI:
             table.add_row("/remember texto", "Salva uma memoria local manualmente")
             table.add_row("/forget-all", "Apaga toda a memoria local")
             table.add_row("/blocked", "Mostra comandos bloqueados")
-            table.add_row("/settings", "Mostra runtime, dry-run e auto-plan")
+            table.add_row("/settings", "Mostra runtime, idioma, dry-run e auto-plan")
             table.add_row("/profile quick|planned", "Troca entre Dia a dia e Profissional")
+            table.add_row("/language auto|pt|en", "Define idioma de resposta")
             table.add_row("/plan on|off", "Liga/desliga preview automatico de plano")
             table.add_row("/dry-run on|off", "Liga/desliga modo dry-run")
             table.add_row("/mode online|hybrid|offline", "Troca o runtime atual")
@@ -282,6 +284,7 @@ class PlainNexusCLI:
                     f"conta={(self.bridge.config.active_account.name if self.bridge.config.active_account else '-')}\n"
                     f"agente={(self.bridge.config.active_agent.name if self.bridge.config.active_agent else '-')}\n"
                     f"perfil={profile_label(getattr(self.bridge.config, 'execution_profile', 'planned'))}\n"
+                    f"idioma={getattr(self.bridge.config, 'response_language', 'auto')}\n"
                     f"mcp={len(self.bridge.config.mcp_servers)}\n"
                     f"notebooks_dir={NexusPaths.notebooks_dir}\n"
                     f"remote={len(self.bridge.config.remote_integrations)} armed={self.bridge.config.remote_armed}\n"
@@ -387,6 +390,7 @@ class PlainNexusCLI:
                 Panel.fit(
                     f"runtime={self.bridge.config.runtime_mode}\n"
                     f"execution_profile={getattr(self.bridge.config, 'execution_profile', 'planned')}\n"
+                    f"response_language={getattr(self.bridge.config, 'response_language', 'auto')}\n"
                     f"dry_run={self.bridge.config.dry_run}\n"
                     f"plan_before_execute={self.bridge.config.plan_before_execute}\n"
                     f"cache={self.bridge.config.llm_cache_enabled}\n"
@@ -403,6 +407,13 @@ class PlainNexusCLI:
             profile = apply_execution_profile(self.bridge.config, value)
             save_config(self.bridge.config)
             self.console.print(f"[green]Perfil ativo: {profile_label(profile)}[/green]")
+            return False
+        if command.startswith("/language "):
+            value = command.split(" ", 1)[1].strip()
+            language = normalize_response_language(value)
+            self.bridge.config.response_language = language
+            save_config(self.bridge.config)
+            self.console.print(f"[green]response_language={language}[/green]")
             return False
         if command in {"/approve", "/run"}:
             self._approve_pending_plan()

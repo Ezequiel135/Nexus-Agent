@@ -9,25 +9,30 @@ from typing import Any
 
 from .actions import AcoesAgente, CancelledExecution
 from .config import NexusConfig, NexusPaths
+from .execution import prompt_explicitly_requests_plan, prompt_is_smalltalk, prompt_requests_execution
+from .language import language_instruction, preferred_response_language
 from .logging_utils import log_event
 from .memory import memory_summary
 from .safeguards import command_assessment
 from .state import ActivityMonitor
+from .system_context import host_summary
 
 
 SYSTEM_PROMPT = (
     "Voce e o Nexus Agent, um agente operacional local. "
-    "Planeje antes de agir, explique brevemente o que esta fazendo e use ferramentas apenas quando necessario. "
+    "Explique brevemente o que esta fazendo e use ferramentas apenas quando necessario. "
     "Fale de forma direta, objetiva e operacional, em estilo parecido com agentes de terminal como Codex e Claude Code. "
     "Quando responder, prefira blocos curtos, resumos de passos e proximos movimentos claros em vez de texto longo. "
     "Nunca assuma permissao irrestrita; respeite dry-run, confirmacoes, limites do runtime e modo offline. "
-    "Se uma acao for arriscada, mostre o plano e sinalize a necessidade de aprovacao. "
+    "So mostre plano quando a tarefa pedir planejamento, for arriscada ou realmente precisar de execucao em multiplos passos. "
+    "Nao quebre conversa comum em passos. "
     "Para tarefas simples de abrir app, mouse, teclado, busca local e atalhos visuais, prefira o menor numero de passos possivel. "
     "Nao prefixe comandos com sudo manualmente; use execucao privilegiada apenas se a sessao sudo/root estiver ativa. "
     "Se o runtime estiver sem LLM remoto, ofereca modo offline local, comandos slash e instrucoes de configuracao. "
     "Se a tarefa envolver tela, mouse, teclado ou browser, use as ferramentas visuais. "
     "Se a tarefa pedir contexto externo vindo de um servidor MCP, use a ferramenta consultar_mcp. "
-    "Se a tarefa envolver notebooks Jupyter, use a ferramenta gerenciar_notebooks."
+    "Se a tarefa envolver notebooks Jupyter, use a ferramenta gerenciar_notebooks. "
+    "Se um comando do sistema nao estiver claro ou faltar contexto externo, use inspecionar_sistema e consultar_web antes de improvisar."
 )
 
 PLANNER_PROMPT = (
@@ -80,12 +85,26 @@ def runtime_prompt(config: NexusConfig) -> str:
         parts.append("Dry-run padrao ativo para acoes modificadoras.")
     if config.plan_before_execute:
         parts.append("Planejamento antes de executar esta habilitado.")
+    parts.append(f"Idioma preferido: {getattr(config, 'response_language', 'auto')}.")
+    parts.append(host_summary())
     return " ".join(parts).strip()
 
 
-def system_prompt(config: NexusConfig) -> str:
+def system_prompt(
+    config: NexusConfig,
+    *,
+    latest_user_prompt: str | None = None,
+    conversational: bool = False,
+) -> str:
     extra = runtime_prompt(config)
-    return f"{SYSTEM_PROMPT} {extra}".strip() if extra else SYSTEM_PROMPT
+    parts = [SYSTEM_PROMPT]
+    if conversational:
+        parts.append("Modo atual: conversa direta. Evite tool calls e responda sem planejamento longo.")
+    if latest_user_prompt:
+        parts.append(language_instruction(config, latest_user_prompt))
+    if extra:
+        parts.append(extra)
+    return " ".join(part for part in parts if part).strip()
 
 
 def planner_prompt(config: NexusConfig) -> str:
@@ -111,13 +130,19 @@ def is_retryable_llm_error(exc: Exception) -> bool:
     return any(marker in haystack for marker in LLM_RETRY_ERROR_MARKERS)
 
 
-def _cache_key(config: NexusConfig, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None) -> str:
+def _cache_key(
+    config: NexusConfig,
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]] | None,
+    request_overrides: dict[str, Any] | None = None,
+) -> str:
     payload = {
         "model": config.model_name,
         "runtime_mode": getattr(config, "runtime_mode", "hybrid"),
         "max_output_tokens": getattr(config, "max_output_tokens", 1200),
         "messages": messages,
         "tools": tools or [],
+        "request_overrides": request_overrides or {},
     }
     encoded = json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
@@ -197,6 +222,7 @@ def completion_with_retries(
     monitor: ActivityMonitor,
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]] | None = None,
+    request_overrides: dict[str, Any] | None = None,
 ) -> Any:
     if not getattr(config, "llm_allowed", True):
         raise RuntimeError("LLM indisponivel no runtime atual. Use modo offline/local ou configure uma conta ativa.")
@@ -209,8 +235,10 @@ def completion_with_retries(
     }
     if tools is not None:
         request_kwargs["tools"] = tools
+    if request_overrides:
+        request_kwargs.update(request_overrides)
 
-    cache_key = _cache_key(config, messages, tools)
+    cache_key = _cache_key(config, messages, tools, request_overrides)
     if getattr(config, "llm_cache_enabled", False):
         with _CACHE_LOCK:
             cache = _load_cache()
@@ -457,6 +485,19 @@ class LiteLLMBridge:
         return completion_with_retries(self.config, self.monitor, messages, tools=tools)
 
     @staticmethod
+    def _latest_user_prompt(conversation: list[dict[str, Any]]) -> str:
+        for message in reversed(conversation):
+            if message.get("role") == "user":
+                return str(message.get("content", "")).strip()
+        return ""
+
+    def _simple_local_reply(self, prompt: str) -> str:
+        language = preferred_response_language(self.config, prompt)
+        if language == "en":
+            return "Hi. I'm ready. If you want me to execute something, send the task directly."
+        return "Oi. Estou pronto. Se quiser que eu execute algo, mande a tarefa direto."
+
+    @staticmethod
     def _message_content(message: Any) -> str:
         content = getattr(message, "content", "")
         if isinstance(content, list):
@@ -512,23 +553,57 @@ class LiteLLMBridge:
                 [],
             )
 
+        latest_prompt = self._latest_user_prompt(conversation)
+        if prompt_is_smalltalk(latest_prompt):
+            self.monitor.set_state("idle", detail="Conversa curta respondida localmente.")
+            return self._simple_local_reply(latest_prompt), []
+
+        conversational_mode = bool(
+            latest_prompt
+            and not prompt_requests_execution(latest_prompt)
+            and not prompt_explicitly_requests_plan(latest_prompt)
+        )
         messages = [
-            {"role": "system", "content": system_prompt(self.config)},
-            {"role": "system", "content": self.actions.capabilities_summary()},
+            {
+                "role": "system",
+                "content": system_prompt(
+                    self.config,
+                    latest_user_prompt=latest_prompt,
+                    conversational=conversational_mode,
+                ),
+            },
             {"role": "system", "content": memory_summary(max_items=self.config.max_memory_items)},
             *_trim_conversation(self.config, conversation),
         ]
+        if not conversational_mode:
+            messages.insert(1, {"role": "system", "content": self.actions.capabilities_summary()})
         tool_logs: list[str] = []
-        rounds = max(1, int(max_rounds or self.config.max_tool_rounds))
+        rounds = 1 if conversational_mode else max(1, int(max_rounds or self.config.max_tool_rounds))
+        max_tokens = min(getattr(self.config, "max_output_tokens", 1200), 320 if conversational_mode else 1200)
         self.monitor.set_cancellable(True)
 
         for round_number in range(1, rounds + 1):
             if self.actions._cancelled():
                 raise CancelledExecution("Execucao cancelada pelo usuario.")
 
-            self.monitor.set_state("thinking", detail=f"Pensando... rodada {round_number}/{rounds}")
-            self.actions.emit_transcript("thinking", text=f"Rodada {round_number}/{rounds}: escolhendo a proxima acao.")
-            response = self._completion(messages, tools=self.actions.tool_schemas())
+            if conversational_mode:
+                self.monitor.set_state("thinking", detail="Respondendo de forma direta.")
+                response = completion_with_retries(
+                    self.config,
+                    self.monitor,
+                    messages,
+                    request_overrides={"max_tokens": max_tokens},
+                )
+            else:
+                self.monitor.set_state("thinking", detail=f"Pensando... rodada {round_number}/{rounds}")
+                self.actions.emit_transcript("thinking", text=f"Rodada {round_number}/{rounds}: escolhendo a proxima acao.")
+                response = completion_with_retries(
+                    self.config,
+                    self.monitor,
+                    messages,
+                    tools=self.actions.tool_schemas(),
+                    request_overrides={"max_tokens": max_tokens},
+                )
             assistant_message = response.choices[0].message
             tool_calls = self._tool_calls(assistant_message)
             messages.append(self._message_to_dict(assistant_message))
