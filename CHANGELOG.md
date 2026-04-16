@@ -10,6 +10,22 @@ O formato segue a ideia de:
 
 ## [Unreleased]
 
+## [26.4.4] - 2026-04-16
+
+### Added
+- Atalho local para abrir browser/app direto a partir de prompts como `abre o chrome`, `open firefox` e variações equivalentes, sem depender do LLM gerar tool-calls corretas.
+- Testes cobrindo detecção de browser direto, launcher visual local e tolerância a argumentos de ferramentas em formatos JSON/Python dict.
+
+### Changed
+- O modo plain e a UI visual agora tratam comandos shell puros e pedidos simples de abrir navegador como execução direta no host antes de cair no fluxo conversacional/planner.
+- O executor de comandos passou a transmitir eventos de `stdout`/`stderr` durante a execução, melhorando o feedback em estilo terminal.
+- A whitelist de comandos foi ampliada para fluxos comuns de desenvolvimento, incluindo `gh`, `npm`, `pnpm`, `yarn`, `node`, `go`, `cargo`, `bun` e `make`.
+
+### Fixed
+- Corrigido o bug em que pedidos como `abre o chrome` podiam ficar presos em raciocínio excessivo ou em tool-call inválida em vez de abrir/focar o navegador real.
+- Corrigido o erro de parse quando o modelo devolvia argumentos de ferramenta com JSON malformado; o bridge agora tenta recuperar com fallback seguro antes de falhar.
+- Corrigido o caso de `gh auth status`, que agora pode rodar como comando direto read-only sem ser barrado indevidamente.
+
 ## [26.4.3] - 2026-04-16
 
 ### Added

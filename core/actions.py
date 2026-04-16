@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import queue
 import shlex
 import shutil
 import subprocess
@@ -106,11 +107,11 @@ class AcoesAgente(ToolRegistry):
         )
         self.register(
             name="controle_periferico",
-            description="Controla mouse, teclado e captura de tela. Acoes: clicar, digitar, mover_mouse, screenshot, posicao_cursor.",
+            description="Controla mouse, teclado, browser/app e captura de tela. Acoes: clicar, digitar, mover_mouse, screenshot, posicao_cursor, abrir_app.",
             parameters={
                 "type": "object",
                 "properties": {
-                    "acao": {"type": "string", "enum": ["clicar", "digitar", "mover_mouse", "screenshot", "posicao_cursor"]},
+                    "acao": {"type": "string", "enum": ["clicar", "digitar", "mover_mouse", "screenshot", "posicao_cursor", "abrir_app"]},
                     "x": {"type": "integer"},
                     "y": {"type": "integer"},
                     "texto": {"type": "string"},
@@ -293,6 +294,32 @@ class AcoesAgente(ToolRegistry):
             return compact
         return compact[: limit - 3].rstrip() + "..."
 
+    def _emit_command_output(self, stream: str, chunk: str) -> None:
+        preview = self._preview_output(chunk, limit=400)
+        if not preview:
+            return
+        self.emit_transcript("command_output", stream=stream, preview=preview)
+
+    def _pump_process_stream(
+        self,
+        pipe,
+        stream_name: str,
+        output_queue: "queue.Queue[tuple[str, str] | None]",
+        buffer: list[str],
+    ) -> None:
+        try:
+            for line in iter(pipe.readline, ""):
+                if line == "":
+                    break
+                buffer.append(line)
+                output_queue.put((stream_name, line))
+        finally:
+            try:
+                pipe.close()
+            except Exception:
+                pass
+            output_queue.put(None)
+
     def privilege_status(self):
         return self.privilege.status()
 
@@ -435,11 +462,40 @@ class AcoesAgente(ToolRegistry):
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            bufsize=1,
         )
         started = time.monotonic()
         effective_timeout = max(1, int(timeout or DEFAULT_COMMAND_TIMEOUT_SECONDS))
+        stdout_chunks: list[str] = []
+        stderr_chunks: list[str] = []
+        output_queue: "queue.Queue[tuple[str, str] | None]" = queue.Queue()
+        stream_done = 0
+        stream_threads = [
+            threading.Thread(
+                target=self._pump_process_stream,
+                args=(proc.stdout, "stdout", output_queue, stdout_chunks),
+                daemon=True,
+            ),
+            threading.Thread(
+                target=self._pump_process_stream,
+                args=(proc.stderr, "stderr", output_queue, stderr_chunks),
+                daemon=True,
+            ),
+        ]
+        for thread in stream_threads:
+            thread.start()
 
         while proc.poll() is None:
+            while True:
+                try:
+                    item = output_queue.get_nowait()
+                except queue.Empty:
+                    break
+                if item is None:
+                    stream_done += 1
+                    continue
+                stream_name, chunk = item
+                self._emit_command_output(stream_name, chunk)
             if self._cancelled():
                 proc.terminate()
                 try:
@@ -467,7 +523,21 @@ class AcoesAgente(ToolRegistry):
                 )
             time.sleep(COMMAND_POLL_INTERVAL_SECONDS)
 
-        stdout, stderr = proc.communicate()
+        proc.wait()
+        while stream_done < len(stream_threads):
+            try:
+                item = output_queue.get(timeout=COMMAND_POLL_INTERVAL_SECONDS)
+            except queue.Empty:
+                continue
+            if item is None:
+                stream_done += 1
+                continue
+            stream_name, chunk = item
+            self._emit_command_output(stream_name, chunk)
+        for thread in stream_threads:
+            thread.join(timeout=0.2)
+        stdout = "".join(stdout_chunks)
+        stderr = "".join(stderr_chunks)
         payload = {
             "ok": proc.returncode == 0,
             "returncode": proc.returncode,
@@ -598,7 +668,51 @@ class AcoesAgente(ToolRegistry):
         if acao == "posicao_cursor":
             pos = runtime.mouse_position()
             return self._json({"x": int(pos[0]), "y": int(pos[1])})
+        if acao == "abrir_app":
+            target = (texto or "").strip()
+            if not target:
+                return self._json({"ok": False, "erro": "texto e obrigatorio para abrir_app"})
+            try:
+                opened = self._open_local_target(target)
+            except Exception as exc:
+                return self._json({"ok": False, "erro": str(exc), "target": target})
+            return self._json({"ok": True, "action": "abrir_app", "target": target, "opened": opened})
         raise ValueError(f"Acao periferica desconhecida: {acao}")
+
+    def _open_local_target(self, target: str) -> str:
+        from pc_remote_agent import runtime
+
+        raw = (target or "").strip()
+        normalized = raw.lower()
+        browser_aliases = {"chrome", "google chrome", "chromium", "firefox", "edge", "microsoft edge"}
+        alias_map = {
+            "google chrome": "chrome",
+            "chrome": "chrome",
+            "chromium": "chromium",
+            "firefox": "firefox",
+            "edge": "edge",
+            "microsoft edge": "edge",
+        }
+
+        if normalized.startswith(("http://", "https://")):
+            return runtime.open_url(raw)
+
+        if normalized in browser_aliases:
+            alias = alias_map[normalized]
+            for candidate in runtime.BROWSER_WINDOW_TITLES.get(alias, ()):
+                if runtime.focus_window(candidate):
+                    return f"focused:{alias}"
+            platform_commands = runtime.BROWSER_COMMANDS.get(runtime.platform_name(), {})
+            for command in platform_commands.get(alias, []):
+                if runtime._command_exists(command):
+                    subprocess.Popen(command + ["about:blank"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    return f"launched:{alias}"
+            raise RuntimeError(f"Navegador '{alias}' nao encontrado neste host.")
+
+        if runtime.focus_window(raw):
+            return f"focused:{raw}"
+        runtime.open_application(raw)
+        return f"launched:{raw}"
 
     def verificar_pixel(self, x: int, y: int) -> str:
         from pc_remote_agent import runtime

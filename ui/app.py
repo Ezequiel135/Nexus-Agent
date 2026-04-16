@@ -35,7 +35,14 @@ from core.config import (
     provider_requires_api_key,
     save_config,
 )
-from core.execution import apply_execution_profile, profile_description, profile_label, should_preview_plan
+from core.execution import (
+    apply_execution_profile,
+    extract_direct_browser_target,
+    profile_description,
+    profile_label,
+    prompt_looks_like_command,
+    should_preview_plan,
+)
 from core.llm import LiteLLMBridge
 from core.logging_utils import log_event
 from core.memory import clear_memory, memory_summary, remember
@@ -850,6 +857,17 @@ class NexusApp(App[None]):
         if self._worker_running():
             self._write_log("[WARN] Ja existe uma execucao em andamento. Pressione Esc para cancelar.")
             return
+        browser_target = extract_direct_browser_target(prompt)
+        if browser_target:
+            self.mission_mode = False
+            self._start_task_log(f"Vou abrir {browser_target} direto no host.")
+            self._start_worker(self._process_direct_visual_action, browser_target)
+            return
+        if prompt_looks_like_command(prompt):
+            self.mission_mode = False
+            self._start_task_log("Vou rodar esse comando direto no terminal e mostrar a saida.")
+            self._start_worker(self._process_direct_command, prompt)
+            return
         if self._should_preview_plan(prompt):
             self.mission_mode = True
             self._start_task_log("Vou montar um plano antes de executar e mostrar os passos conforme avancar.")
@@ -1185,6 +1203,79 @@ class NexusApp(App[None]):
             self.call_from_thread(self._write_chat, f"**ERRO:** {exc}")
             self.call_from_thread(self._write_log, f"[ERROR] {exc}")
             self.call_from_thread(self._finish_task_log, "Execucao terminou com erro.")
+        finally:
+            self.monitor.set_cancellable(False)
+            self.call_from_thread(self._focus_prompt)
+
+    def _process_direct_command(self, prompt: str) -> None:
+        try:
+            log_event("PROMPT", prompt)
+            self._set_mission_panel(f"Executando comando direto: {prompt}")
+            payload = json.loads(self.bridge.actions.executar_comando(prompt))
+            lines = [f"**Terminal:** `{prompt}`"]
+            if payload.get("stdout"):
+                lines.append("```text")
+                lines.append(str(payload["stdout"]))
+                lines.append("```")
+            if payload.get("stderr"):
+                lines.append("```text")
+                lines.append(str(payload["stderr"]))
+                lines.append("```")
+            if payload.get("erro"):
+                lines.append(f"**Erro:** {payload['erro']}")
+            if payload.get("returncode") is not None:
+                lines.append(f"**Exit:** `{payload['returncode']}`")
+            self.call_from_thread(self._write_chat, "\n".join(lines))
+            if payload.get("ok"):
+                self.call_from_thread(self._set_light, "LUZ VERDE — comando de terminal concluido")
+                self.call_from_thread(self._set_mission_panel, "Comando de terminal concluido.")
+                self.call_from_thread(self._finish_task_log, "Comando de terminal concluido.")
+            else:
+                self.call_from_thread(self._set_light, "LUZ VERMELHA — comando de terminal finalizado com erro")
+                self.call_from_thread(self._set_mission_panel, "Comando de terminal finalizado com erro.")
+                self.call_from_thread(self._finish_task_log, "Comando de terminal finalizado com erro.")
+        except CancelledExecution as exc:
+            self.call_from_thread(self._write_chat, f"**CANCELADO:** {exc}")
+            self.call_from_thread(self._write_log, f"[WARN] {exc}")
+            self.call_from_thread(self._set_mission_panel, "Comando de terminal cancelado.")
+            self.call_from_thread(self._finish_task_log, "Comando de terminal cancelado.")
+        except Exception as exc:
+            self.monitor.set_state("error", str(exc))
+            self.call_from_thread(self._write_chat, f"**ERRO:** {exc}")
+            self.call_from_thread(self._write_log, f"[ERROR] {exc}")
+            self.call_from_thread(self._finish_task_log, "Comando de terminal terminou com erro.")
+        finally:
+            self.monitor.set_cancellable(False)
+            self.call_from_thread(self._focus_prompt)
+
+    def _process_direct_visual_action(self, target: str) -> None:
+        try:
+            self._set_mission_panel(f"Abrindo alvo visual: {target}")
+            payload = json.loads(self.bridge.actions.controle_periferico("abrir_app", texto=target))
+            lines = [f"**Visual:** `{target}`"]
+            if payload.get("opened"):
+                lines.append(f"**Resultado:** `{payload['opened']}`")
+            if payload.get("erro"):
+                lines.append(f"**Erro:** {payload['erro']}")
+            self.call_from_thread(self._write_chat, "\n".join(lines))
+            if payload.get("ok"):
+                self.call_from_thread(self._set_light, "LUZ VERDE — acao visual concluida")
+                self.call_from_thread(self._set_mission_panel, "Acao visual concluida.")
+                self.call_from_thread(self._finish_task_log, "Acao visual concluida.")
+            else:
+                self.call_from_thread(self._set_light, "LUZ VERMELHA — acao visual finalizada com erro")
+                self.call_from_thread(self._set_mission_panel, "Acao visual finalizada com erro.")
+                self.call_from_thread(self._finish_task_log, "Acao visual finalizada com erro.")
+        except CancelledExecution as exc:
+            self.call_from_thread(self._write_chat, f"**CANCELADO:** {exc}")
+            self.call_from_thread(self._write_log, f"[WARN] {exc}")
+            self.call_from_thread(self._set_mission_panel, "Acao visual cancelada.")
+            self.call_from_thread(self._finish_task_log, "Acao visual cancelada.")
+        except Exception as exc:
+            self.monitor.set_state("error", str(exc))
+            self.call_from_thread(self._write_chat, f"**ERRO:** {exc}")
+            self.call_from_thread(self._write_log, f"[ERROR] {exc}")
+            self.call_from_thread(self._finish_task_log, "Acao visual terminou com erro.")
         finally:
             self.monitor.set_cancellable(False)
             self.call_from_thread(self._focus_prompt)

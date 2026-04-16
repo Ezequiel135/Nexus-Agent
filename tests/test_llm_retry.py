@@ -20,6 +20,11 @@ class DummyMonitor:
 
 
 class LlmRetryTests(TestCase):
+    def test_parse_tool_arguments_accepts_json_and_python_dict(self) -> None:
+        self.assertEqual(llm._parse_tool_arguments('{"comando":"gh auth status"}'), {"comando": "gh auth status"})
+        self.assertEqual(llm._parse_tool_arguments("{'acao': 'abrir_app', 'texto': 'chrome'}"), {"acao": "abrir_app", "texto": "chrome"})
+        self.assertEqual(llm._parse_tool_arguments("{invalido"), {})
+
     def test_retry_delay_seconds_is_progressive(self) -> None:
         self.assertEqual(llm.retry_delay_seconds(1), 10)
         self.assertEqual(llm.retry_delay_seconds(2), 20)

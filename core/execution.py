@@ -137,18 +137,25 @@ EXECUTION_HINTS = VISUAL_SHORTCUT_HINTS | COMPLEX_HINTS | {
 
 COMMAND_STYLE_PREFIXES = {
     "apt",
+    "bun",
     "brew",
+    "cargo",
     "chmod",
     "chown",
     "cp",
     "docker",
+    "gh",
     "git",
+    "go",
     "kubectl",
     "ls",
+    "make",
     "mkdir",
     "mv",
+    "node",
     "npm",
     "npx",
+    "pnpm",
     "pip",
     "pip3",
     "python",
@@ -160,6 +167,7 @@ COMMAND_STYLE_PREFIXES = {
     "touch",
     "uv",
     "winget",
+    "yarn",
 }
 
 CASUAL_EXACT_HINTS = {
@@ -211,6 +219,20 @@ CASUAL_TOKENS = {
 QUESTION_LEADS = {"como", "what", "why", "when", "where", "who", "qual", "quais", "por", "porque"}
 GIT_RISK_PATTERN = re.compile(r"\bgit\s+(add|checkout|clean|clone|commit|merge|pull|push|rebase|reset|restore|switch)\b")
 PUNCT_RE = re.compile(r"[^\w\s./:+-]+", re.UNICODE)
+DIRECT_BROWSER_PATTERNS = (
+    re.compile(r"\b(abre|abrir|abra|open|start|launch)\s+(o|a)?\s*(google\s+chrome|chrome)\b", re.IGNORECASE),
+    re.compile(r"\b(abre|abrir|abra|open|start|launch)\s+(o|a)?\s*(chromium)\b", re.IGNORECASE),
+    re.compile(r"\b(abre|abrir|abra|open|start|launch)\s+(o|a)?\s*(firefox)\b", re.IGNORECASE),
+    re.compile(r"\b(abre|abrir|abra|open|start|launch)\s+(o|a)?\s*(edge|microsoft\s+edge)\b", re.IGNORECASE),
+)
+BROWSER_TARGET_ALIASES = {
+    "google chrome": "chrome",
+    "chrome": "chrome",
+    "chromium": "chromium",
+    "firefox": "firefox",
+    "edge": "edge",
+    "microsoft edge": "edge",
+}
 
 
 def profile_label(value: str | None) -> str:
@@ -344,3 +366,14 @@ def should_preview_plan(config: "NexusConfig", prompt: str) -> bool:
     if profile == "quick":
         return False
     return bool(getattr(config, "plan_before_execute", True) and prompt_is_complex(prompt))
+
+
+def extract_direct_browser_target(prompt: str) -> str | None:
+    raw = (prompt or "").strip()
+    if not raw:
+        return None
+    for pattern in DIRECT_BROWSER_PATTERNS:
+        match = pattern.search(raw)
+        if match:
+            return BROWSER_TARGET_ALIASES.get(match.group(3).strip().lower())
+    return None

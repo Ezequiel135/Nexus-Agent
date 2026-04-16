@@ -29,7 +29,9 @@ BLOCKED_RULES = [
 
 SAFE_EXECUTABLES = {
     "awk",
+    "bun",
     "cat",
+    "cargo",
     "cmd",
     "cp",
     "date",
@@ -41,19 +43,26 @@ SAFE_EXECUTABLES = {
     "env",
     "file",
     "find",
+    "gh",
     "gio",
     "git",
+    "go",
     "gsettings",
     "grep",
     "head",
     "hostname",
+    "make",
     "launchctl",
     "ls",
     "mkdir",
     "mv",
+    "node",
     "netsh",
     "networksetup",
     "nmcli",
+    "npm",
+    "npx",
+    "pnpm",
     "pip",
     "pip3",
     "pmset",
@@ -84,22 +93,32 @@ SAFE_EXECUTABLES = {
     "xdg-settings",
     "whoami",
     "winget",
+    "yarn",
     "zip",
 }
 
 CONFIRMATION_EXECUTABLES = {
+    "bun",
+    "cargo",
     "cmd",
     "cp",
     "defaults",
     "dism",
+    "gh",
     "git",
+    "go",
     "gsettings",
     "launchctl",
     "mkdir",
+    "make",
     "mv",
     "netsh",
     "networksetup",
     "nmcli",
+    "node",
+    "npm",
+    "npx",
+    "pnpm",
     "pip",
     "pip3",
     "pmset",
@@ -119,6 +138,7 @@ CONFIRMATION_EXECUTABLES = {
     "uv",
     "winget",
     "xdg-settings",
+    "yarn",
 }
 
 READ_ONLY_PRIVILEGED_EXECUTABLES = {
@@ -271,6 +291,10 @@ def command_assessment(command: str, extra_safe_executables: set[str] | None = N
         )
         if "push" in argv[1:]:
             return CommandAssessment(False, "red", "git push via agente shell foi bloqueado; use fluxo explicito de publicacao.", executable=executable, argv=argv, modifies_state=True)
+
+    if executable == "gh":
+        if len(argv) >= 3 and argv[1] == "auth" and argv[2] == "status":
+            modifies_state = False
 
     if executable in {"python", "python3"}:
         if any(token in {"-c", "-m"} for token in argv[1:3]):

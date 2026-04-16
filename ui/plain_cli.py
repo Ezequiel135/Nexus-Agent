@@ -46,7 +46,13 @@ except ImportError:
 
 from core.actions import CancelledExecution
 from core.config import NexusPaths, normalize_response_language, save_config
-from core.execution import apply_execution_profile, profile_label, should_preview_plan
+from core.execution import (
+    apply_execution_profile,
+    extract_direct_browser_target,
+    profile_label,
+    prompt_looks_like_command,
+    should_preview_plan,
+)
 from core.llm import LiteLLMBridge
 from core.logging_utils import log_event
 from core.memory import clear_memory, memory_summary, remember
@@ -183,6 +189,15 @@ class PlainNexusCLI:
         log_event("PROMPT", prompt)
         remember(prompt, source="user", kind="prompt")
         try:
+            browser_target = extract_direct_browser_target(prompt)
+            if browser_target:
+                self._start_task_log(f"Vou abrir {browser_target} direto no host.")
+                self._run_direct_visual_action(browser_target)
+                return
+            if prompt_looks_like_command(prompt):
+                self._start_task_log("Vou rodar esse comando direto no terminal e transmitir a saida.")
+                self._run_direct_command(prompt)
+                return
             if self._should_preview_plan(prompt):
                 self._start_task_log("Vou montar um plano antes de executar e mostrar cada passo.")
                 self.pending_plan = self.bridge.preview_plan(prompt)
@@ -226,6 +241,43 @@ class PlainNexusCLI:
         self.console.print(Panel.fit(answer or "(sem resposta)", title="NEXUS AGENT", border_style="green"))
         self._finish_task_log("Execucao direta concluida.")
 
+    def _run_direct_command(self, command: str) -> None:
+        self.cancel_event.clear()
+        payload = json.loads(self.bridge.actions.executar_comando(command))
+        title = "Terminal"
+        border_style = "green" if payload.get("ok") else "red"
+        body_lines = [f"comando: {command}"]
+        if payload.get("dry_run"):
+            body_lines.append("modo: dry-run")
+        if payload.get("stdout"):
+            body_lines.append("")
+            body_lines.append("[stdout]")
+            body_lines.append(str(payload["stdout"]))
+        if payload.get("stderr"):
+            body_lines.append("")
+            body_lines.append("[stderr]")
+            body_lines.append(str(payload["stderr"]))
+        if payload.get("erro"):
+            body_lines.append("")
+            body_lines.append(f"erro: {payload['erro']}")
+        if payload.get("returncode") is not None:
+            body_lines.append("")
+            body_lines.append(f"exit={payload['returncode']}")
+        self.console.print(Panel.fit("\n".join(body_lines), title=title, border_style=border_style))
+        self._finish_task_log("Comando de terminal concluido." if payload.get("ok") else "Comando de terminal finalizado com erro.")
+
+    def _run_direct_visual_action(self, target: str) -> None:
+        self.cancel_event.clear()
+        payload = json.loads(self.bridge.actions.controle_periferico("abrir_app", texto=target))
+        border_style = "green" if payload.get("ok") else "red"
+        body_lines = [f"acao: abrir_app", f"target: {target}"]
+        if payload.get("opened"):
+            body_lines.append(f"resultado: {payload['opened']}")
+        if payload.get("erro"):
+            body_lines.append(f"erro: {payload['erro']}")
+        self.console.print(Panel.fit("\n".join(body_lines), title="Visual", border_style=border_style))
+        self._finish_task_log("Acao visual concluida." if payload.get("ok") else "Acao visual finalizada com erro.")
+
     def _approve_pending_plan(self) -> None:
         if self.pending_plan is None:
             self.console.print("[yellow]Nenhum plano pendente.[/yellow]")
@@ -257,6 +309,7 @@ class PlainNexusCLI:
             table.add_row("/remote", "Lista integracoes remotas")
             table.add_row("nexus parallel run ...", "Executa varios agentes em paralelo via CLI")
             table.add_row("/tools", "Mostra as ferramentas locais que a IA sabe usar")
+            table.add_row("gh auth status", "Comando shell direto: comandos parecidos rodam no terminal sem passar pelo LLM")
             table.add_row("/memory", "Mostra a memoria local salva")
             table.add_row("/remember texto", "Salva uma memoria local manualmente")
             table.add_row("/forget-all", "Apaga toda a memoria local")

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -9,7 +10,7 @@ from unittest.mock import patch
 
 from core.actions import AcoesAgente
 from core.config import NexusPaths, build_initial_config, make_account, make_agent
-from core.execution import apply_execution_profile, should_preview_plan
+from core.execution import apply_execution_profile, extract_direct_browser_target, should_preview_plan
 from core.llm import LiteLLMBridge
 from core.privilege import PrivilegeSessionManager
 from core.safeguards import command_assessment
@@ -128,6 +129,50 @@ class SecurityRuntimeTests(unittest.TestCase):
         self.assertIn("root ativo", activation_message)
         self.assertTrue(manager.status().active)
         self.assertEqual(manager.status().mode, "root")
+
+    def test_gh_auth_status_is_allowed_as_read_only_command(self) -> None:
+        assessment = command_assessment("gh auth status")
+
+        self.assertTrue(assessment.allowed)
+        self.assertEqual(assessment.level, "green")
+        self.assertFalse(assessment.needs_confirmation)
+
+    def test_command_output_is_streamed_while_process_runs(self) -> None:
+        config = make_config()
+        actions = AcoesAgente(config)
+        events: list[str] = []
+        actions.set_event_callback(events.append)
+
+        payload = json.loads(actions.executar_comando("python3 -c \"print('nexus-stream')\""))
+
+        self.assertTrue(payload["ok"])
+        self.assertIn("nexus-stream", payload["stdout"])
+        self.assertTrue(any("command_output" in event and "nexus-stream" in event for event in events))
+
+    def test_direct_browser_prompt_extracts_chrome_alias(self) -> None:
+        self.assertEqual(extract_direct_browser_target("abre o chrome"), "chrome")
+        self.assertEqual(extract_direct_browser_target("open firefox"), "firefox")
+        self.assertIsNone(extract_direct_browser_target("me explica o chrome"))
+
+    def test_open_local_target_uses_browser_launcher(self) -> None:
+        config = make_config()
+        actions = AcoesAgente(config)
+        fake_runtime = SimpleNamespace(
+            focus_window=lambda _name: False,
+            _command_exists=lambda _command: True,
+            BROWSER_WINDOW_TITLES={"chrome": ("google chrome", "chrome")},
+            BROWSER_COMMANDS={"linux": {"chrome": [["google-chrome"]]}},
+            platform_name=lambda: "linux",
+            open_url=lambda url: f"opened:{url}",
+            open_application=lambda command: True,
+        )
+
+        with patch.dict(sys.modules, {"pc_remote_agent.runtime": fake_runtime}), \
+             patch("core.actions.subprocess.Popen") as popen_mock:
+            result = actions._open_local_target("chrome")
+
+        self.assertEqual(result, "launched:chrome")
+        popen_mock.assert_called()
 
 
 if __name__ == "__main__":

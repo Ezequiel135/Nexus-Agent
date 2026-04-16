@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 import threading
@@ -210,6 +211,31 @@ def _extract_json(text: str) -> str:
         lines = [line for line in stripped.splitlines() if not line.startswith("```")]
         return "\n".join(lines).strip()
     return stripped
+
+
+def _parse_tool_arguments(raw_args: Any) -> dict[str, Any]:
+    if raw_args is None:
+        return {}
+    if isinstance(raw_args, dict):
+        return raw_args
+    if not isinstance(raw_args, str):
+        return {}
+
+    text = raw_args.strip()
+    if not text:
+        return {}
+
+    try:
+        parsed = json.loads(text)
+        return parsed if isinstance(parsed, dict) else {}
+    except json.JSONDecodeError:
+        pass
+
+    try:
+        parsed = ast.literal_eval(text)
+        return parsed if isinstance(parsed, dict) else {}
+    except (ValueError, SyntaxError):
+        return {}
 
 
 def _trim_conversation(config: NexusConfig, conversation: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -620,7 +646,7 @@ class LiteLLMBridge:
                 fn = getattr(call, "function", None) or call.get("function", {})
                 fn_name = getattr(fn, "name", None) or fn.get("name")
                 raw_args = getattr(fn, "arguments", None) or fn.get("arguments", "{}")
-                arguments = json.loads(raw_args or "{}")
+                arguments = _parse_tool_arguments(raw_args)
                 self.monitor.set_state("acting", detail=f"Executando ferramenta: {fn_name}")
                 tool_result = self.actions.dispatch_tool(fn_name, arguments)
                 tool_logs.append(f"{fn_name}({arguments})")

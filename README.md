@@ -13,6 +13,8 @@ O **NEXUS AGENT** roda no terminal, entende instrucoes em linguagem natural e ex
 ## Recursos
 
 - Execucao de comandos locais com controles de seguranca
+- Execucao direta de comandos shell digitados no prompt, como `gh auth status` e `git status`
+- Abertura direta de navegador/app para pedidos simples como `abre o chrome`
 - Manipulacao de arquivos e memoria local
 - Interface visual com Textual e modo plain para terminal puro
 - Suporte a MCP via `stdio`
@@ -142,6 +144,18 @@ Com tarefa inicial:
 nexus start --plain --task "organize meus arquivos de download"
 ```
 
+### Exemplos de uso direto
+
+No prompt do Nexus, voce pode mandar:
+
+- `gh auth status`
+- `git status`
+- `abre o chrome`
+- `open firefox`
+- `abre o edge`
+
+Comandos shell puros sao executados direto no terminal quando passam nas regras de seguranca. Pedidos simples de abrir navegador/app tentam focar a janela existente e, se necessario, lancam o app de verdade no host.
+
 ### Comandos principais
 
 ```bash
@@ -215,6 +229,12 @@ Use comandos como:
 - `/blocked`
 - `/approve`
 - `/cancel`
+
+O Nexus tambem aceita:
+
+- comandos shell curtos digitados diretamente no prompt
+- pedidos visuais simples para abrir navegador/app
+- fluxo assistido por LLM para tarefas mais abertas ou com multiplos passos
 
 ## MCP
 
@@ -299,6 +319,20 @@ Instale:
 ```bash
 sudo apt install scrot xdotool tesseract-ocr
 ```
+
+### Pedido como `abre o chrome` nao abre o navegador
+
+Confira:
+
+- se Chrome, Chromium, Firefox ou Edge estao instalados no host
+- se o ambiente grafico atual permite abrir janelas
+- se o Nexus esta rodando na mesma sessao grafica do usuario
+
+Se quiser testar o fluxo shell primeiro, rode `gh auth status` ou `git status` no prompt do Nexus.
+
+### Erro de JSON/tool-call vindo do modelo
+
+As releases novas tentam recuperar argumentos de ferramenta mesmo quando o modelo devolve JSON quebrado ou formato parecido com dict Python. Se ainda falhar, repita a tarefa em forma mais curta e direta, por exemplo `abre o chrome` ou `gh auth status`.
 
 ### `install.sh` falha com `NO_PUBKEY` ou erro em repositório de terceiro
 
