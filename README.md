@@ -147,11 +147,61 @@ nexus start --plain --task "organize meus arquivos de download"
 ```bash
 nexus setup
 nexus doctor
+nexus update
+nexus uninstall
 nexus accounts
 nexus agents
 nexus mcp list
 nexus notebook list
 nexus parallel list
+```
+
+## Atualizar e desinstalar
+
+### Atualizacao automatica do app
+
+Para atualizar o Nexus instalado em `~/.nexus/src`, use:
+
+```bash
+nexus update
+```
+
+Esse comando:
+
+- faz `git pull` do repositório configurado
+- reinstala as dependencias Python da versao nova
+- mantém sua configuracao em `~/.nexus/config.json`
+
+Se quiser atualizar e abrir o app em seguida:
+
+```bash
+nexus update && nexus start --plain
+```
+
+### Desinstalar tudo
+
+Para remover a instalacao local do Nexus:
+
+```bash
+nexus uninstall
+```
+
+Esse comando remove:
+
+- `~/.nexus`
+- `~/.local/bin/nexus`
+
+Se voce instalou tambem o wrapper global em `/usr/local/bin/nexus`, remova manualmente:
+
+```bash
+sudo rm -f /usr/local/bin/nexus
+hash -r
+```
+
+Para conferir se sobrou algum launcher no `PATH`:
+
+```bash
+type -a nexus
 ```
 
 ### Dentro da sessao
