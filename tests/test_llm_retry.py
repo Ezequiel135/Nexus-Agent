@@ -20,6 +20,38 @@ class DummyMonitor:
 
 
 class LlmRetryTests(TestCase):
+    def test_system_prompt_requires_executable_json_for_operational_requests(self) -> None:
+        config = SimpleNamespace(
+            runtime_mode="hybrid",
+            execution_profile="quick",
+            active_account=SimpleNamespace(name="Conta", provider_label="OpenAI", model_name="gpt-4o-mini"),
+            active_agent=SimpleNamespace(name="Agente", system_prompt=""),
+            dry_run=False,
+            plan_before_execute=False,
+            response_language="pt-BR",
+        )
+
+        prompt = llm.system_prompt(config, latest_user_prompt="abre o chrome", conversational=False)
+
+        self.assertIn("prefira tool calls", prompt)
+        self.assertIn("devolva apenas JSON executavel", prompt)
+
+    def test_system_prompt_keeps_conversation_mode_without_operational_json_contract(self) -> None:
+        config = SimpleNamespace(
+            runtime_mode="hybrid",
+            execution_profile="quick",
+            active_account=None,
+            active_agent=None,
+            dry_run=False,
+            plan_before_execute=False,
+            response_language="pt-BR",
+        )
+
+        prompt = llm.system_prompt(config, latest_user_prompt="oi", conversational=True)
+
+        self.assertIn("Modo atual: conversa direta", prompt)
+        self.assertNotIn("devolva apenas JSON executavel", prompt)
+
     def test_parse_tool_arguments_accepts_json_and_python_dict(self) -> None:
         self.assertEqual(llm._parse_tool_arguments('{"comando":"gh auth status"}'), {"comando": "gh auth status"})
         self.assertEqual(llm._parse_tool_arguments("{'acao': 'abrir_app', 'texto': 'chrome'}"), {"acao": "abrir_app", "texto": "chrome"})

@@ -4,6 +4,8 @@ from types import SimpleNamespace
 import unittest
 
 import main
+from core.assistant_actions import parse_assistant_actions
+from ui.plain_cli import _normalize_assistant_answer
 from ui.plain_cli import format_onboarding_message, format_session_summary
 
 
@@ -41,3 +43,22 @@ class StartupFlowTests(unittest.TestCase):
         self.assertIn("Primeira sessao concluida", message)
         self.assertIn("/tools", message)
         self.assertIn("nexus parallel run", message)
+
+    def test_normalize_assistant_answer_flags_raw_tool_json_without_execution(self) -> None:
+        text, executed = _normalize_assistant_answer('[{"tool":"bash","command":"google-chrome &"}]', [])
+
+        self.assertFalse(executed)
+        self.assertIn("execucao automatica nao foi concluida", text)
+
+    def test_parse_assistant_actions_supports_terminal_and_visual_formats(self) -> None:
+        parsed = parse_assistant_actions(
+            '[{"tool":"bash","command":"gh auth status"},{"tool":"controle_periferico","acao":"abrir_app","texto":"chrome"}]'
+        )
+
+        self.assertEqual(
+            parsed,
+            [
+                {"kind": "command", "command": "gh auth status"},
+                {"kind": "visual", "action": "abrir_app", "target": "chrome"},
+            ],
+        )

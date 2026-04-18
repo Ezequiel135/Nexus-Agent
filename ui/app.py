@@ -20,6 +20,7 @@ from textual.containers import Container, Horizontal, Vertical, VerticalScroll
 from textual.widgets import Button, Footer, Input, RichLog, Static
 
 from core.actions import AcoesAgente, CancelledExecution
+from core.assistant_actions import parse_assistant_actions
 from core.config import (
     KNOWN_PROVIDERS,
     NexusConfig,
@@ -37,7 +38,7 @@ from core.config import (
 )
 from core.execution import (
     apply_execution_profile,
-    extract_direct_browser_target,
+    extract_direct_visual_shortcut,
     profile_description,
     profile_label,
     prompt_looks_like_command,
@@ -857,11 +858,12 @@ class NexusApp(App[None]):
         if self._worker_running():
             self._write_log("[WARN] Ja existe uma execucao em andamento. Pressione Esc para cancelar.")
             return
-        browser_target = extract_direct_browser_target(prompt)
-        if browser_target:
+        visual_shortcut = extract_direct_visual_shortcut(prompt)
+        if visual_shortcut:
+            action, target = visual_shortcut
             self.mission_mode = False
-            self._start_task_log(f"Vou abrir {browser_target} direto no host.")
-            self._start_worker(self._process_direct_visual_action, browser_target)
+            self._start_task_log(self._visual_shortcut_status(action, target))
+            self._start_worker(self._process_direct_visual_action, action, target)
             return
         if prompt_looks_like_command(prompt):
             self.mission_mode = False
@@ -887,6 +889,11 @@ class NexusApp(App[None]):
 
     def _should_preview_plan(self, prompt: str) -> bool:
         return should_preview_plan(self.bridge.config, prompt)
+
+    def _visual_shortcut_status(self, action: str, target: str) -> str:
+        if action == "atalho_teclado" and target == "win":
+            return "Vou abrir o menu de aplicativos direto no host."
+        return f"Vou abrir {target} direto no host."
 
     def action_mission_mode(self) -> None:
         self.bridge.config.plan_before_execute = not self.bridge.config.plan_before_execute
@@ -1187,12 +1194,16 @@ class NexusApp(App[None]):
             self.conversation.append({"role": "user", "content": prompt})
             self._save_history()
             self._set_mission_panel("Execucao direta em andamento...")
-            answer, _tool_logs = self.bridge.chat(self.conversation)
+            answer, tool_logs = self.bridge.chat(self.conversation)
+            fallback_executed = False
+            if not tool_logs:
+                fallback_executed = self._execute_assistant_actions(answer)
             self.conversation.append({"role": "assistant", "content": answer})
             self._save_history()
-            self.call_from_thread(self._write_chat, answer)
-            self.call_from_thread(self._set_mission_panel, "Execucao direta concluida.")
-            self.call_from_thread(self._finish_task_log, "Execucao direta concluida.")
+            final_text = answer if not fallback_executed else "Acao executada a partir do comando estruturado devolvido pela IA."
+            self.call_from_thread(self._write_chat, final_text)
+            self.call_from_thread(self._set_mission_panel, "Execucao direta concluida." if (tool_logs or fallback_executed) else "Resposta recebida sem execucao confirmada.")
+            self.call_from_thread(self._finish_task_log, "Execucao direta concluida." if (tool_logs or fallback_executed) else "Resposta recebida sem execucao confirmada.")
         except CancelledExecution as exc:
             self.call_from_thread(self._write_chat, f"**CANCELADO:** {exc}")
             self.call_from_thread(self._write_log, f"[WARN] {exc}")
@@ -1206,6 +1217,52 @@ class NexusApp(App[None]):
         finally:
             self.monitor.set_cancellable(False)
             self.call_from_thread(self._focus_prompt)
+
+    def _execute_assistant_actions(self, answer: str) -> bool:
+        actions = parse_assistant_actions(answer)
+        if not actions:
+            return False
+        executed = False
+        for item in actions:
+            if item["kind"] == "command":
+                payload = json.loads(self.bridge.actions.executar_comando(str(item["command"])))
+                lines = [f"**Terminal:** `{item['command']}`"]
+                if payload.get("stdout"):
+                    lines.append("```text")
+                    lines.append(str(payload["stdout"]))
+                    lines.append("```")
+                if payload.get("stderr"):
+                    lines.append("```text")
+                    lines.append(str(payload["stderr"]))
+                    lines.append("```")
+                if payload.get("erro"):
+                    lines.append(f"**Erro:** {payload['erro']}")
+                if payload.get("returncode") is not None:
+                    lines.append(f"**Exit:** `{payload['returncode']}`")
+                self.call_from_thread(self._write_chat, "\n".join(lines))
+                executed = True
+                continue
+            if item["kind"] == "visual":
+                payload = json.loads(
+                    self.bridge.actions.controle_periferico(
+                        str(item["action"]),
+                        x=item.get("x"),
+                        y=item.get("y"),
+                        texto=item.get("target"),
+                    )
+                )
+                lines = [f"**Visual:** `{item['action']}`"]
+                if item.get("target"):
+                    lines[0] += f" `{item['target']}`"
+                if payload.get("opened"):
+                    lines.append(f"**Resultado:** `{payload['opened']}`")
+                if payload.get("keys"):
+                    lines.append(f"**Teclas:** `{payload['keys']}`")
+                if payload.get("erro"):
+                    lines.append(f"**Erro:** {payload['erro']}")
+                self.call_from_thread(self._write_chat, "\n".join(lines))
+                executed = True
+        return executed
 
     def _process_direct_command(self, prompt: str) -> None:
         try:
@@ -1248,13 +1305,15 @@ class NexusApp(App[None]):
             self.monitor.set_cancellable(False)
             self.call_from_thread(self._focus_prompt)
 
-    def _process_direct_visual_action(self, target: str) -> None:
+    def _process_direct_visual_action(self, action: str, target: str) -> None:
         try:
-            self._set_mission_panel(f"Abrindo alvo visual: {target}")
-            payload = json.loads(self.bridge.actions.controle_periferico("abrir_app", texto=target))
-            lines = [f"**Visual:** `{target}`"]
+            self._set_mission_panel(f"Executando acao visual: {action} {target}")
+            payload = json.loads(self.bridge.actions.controle_periferico(action, texto=target))
+            lines = [f"**Visual:** `{action}` `{target}`"]
             if payload.get("opened"):
                 lines.append(f"**Resultado:** `{payload['opened']}`")
+            if payload.get("keys"):
+                lines.append(f"**Teclas:** `{payload['keys']}`")
             if payload.get("erro"):
                 lines.append(f"**Erro:** {payload['erro']}")
             self.call_from_thread(self._write_chat, "\n".join(lines))

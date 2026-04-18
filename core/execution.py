@@ -27,7 +27,10 @@ PROFILE_SETTINGS = {
 }
 
 VISUAL_SHORTCUT_HINTS = {
+    "abre",
     "abrir",
+    "abra",
+    "abri",
     "application",
     "apertar",
     "app",
@@ -220,10 +223,13 @@ QUESTION_LEADS = {"como", "what", "why", "when", "where", "who", "qual", "quais"
 GIT_RISK_PATTERN = re.compile(r"\bgit\s+(add|checkout|clean|clone|commit|merge|pull|push|rebase|reset|restore|switch)\b")
 PUNCT_RE = re.compile(r"[^\w\s./:+-]+", re.UNICODE)
 DIRECT_BROWSER_PATTERNS = (
-    re.compile(r"\b(abre|abrir|abra|open|start|launch)\s+(o|a)?\s*(google\s+chrome|chrome)\b", re.IGNORECASE),
-    re.compile(r"\b(abre|abrir|abra|open|start|launch)\s+(o|a)?\s*(chromium)\b", re.IGNORECASE),
-    re.compile(r"\b(abre|abrir|abra|open|start|launch)\s+(o|a)?\s*(firefox)\b", re.IGNORECASE),
-    re.compile(r"\b(abre|abrir|abra|open|start|launch)\s+(o|a)?\s*(edge|microsoft\s+edge)\b", re.IGNORECASE),
+    re.compile(r"\b(abre|abrir|abra|abri|open|start|launch)\b(?:\s+\w+){0,4}?\s*\b(google\s+chrome|chrome)\b", re.IGNORECASE),
+    re.compile(r"\b(abre|abrir|abra|abri|open|start|launch)\b(?:\s+\w+){0,4}?\s*\b(chromium)\b", re.IGNORECASE),
+    re.compile(r"\b(abre|abrir|abra|abri|open|start|launch)\b(?:\s+\w+){0,4}?\s*\b(firefox)\b", re.IGNORECASE),
+    re.compile(r"\b(abre|abrir|abra|abri|open|start|launch)\b(?:\s+\w+){0,4}?\s*\b(edge|microsoft\s+edge)\b", re.IGNORECASE),
+)
+DIRECT_APP_PATTERNS = (
+    re.compile(r"^\s*(?:abre|abrir|abra|abri|open|start|launch)\s+(.+?)\s*$", re.IGNORECASE),
 )
 BROWSER_TARGET_ALIASES = {
     "google chrome": "chrome",
@@ -232,6 +238,33 @@ BROWSER_TARGET_ALIASES = {
     "firefox": "firefox",
     "edge": "edge",
     "microsoft edge": "edge",
+}
+GENERIC_APP_REQUEST_PATTERNS = (
+    re.compile(r"\b(?:abre|abrir|abra|abri|open|start|launch)\b(?:\s+\w+){0,4}?\b(?:algum|alguma|qualquer)\s+(?:app|aplicativo|programa)\b", re.IGNORECASE),
+    re.compile(r"\b(?:abre|abrir|abra|abri|open|start|launch)\b(?:\s+\w+){0,4}?\b(?:app|aplicativo|programa)\s+(?:do|no)\s+meu\s+pc\b", re.IGNORECASE),
+)
+APP_FILLER_PREFIXES = ("o", "a", "os", "as", "um", "uma", "meu", "minha")
+APP_FILLER_SUFFIXES = (
+    " do meu pc",
+    " no meu pc",
+    " aqui",
+    " pra mim",
+    " para mim",
+)
+GENERIC_APP_TAILS = {
+    "app",
+    "aplicativo",
+    "programa",
+    "janela",
+    "launcher",
+    "menu",
+    "menu de aplicativos",
+    "algum app",
+    "algum aplicativo",
+    "algum programa",
+    "qualquer app",
+    "qualquer aplicativo",
+    "qualquer programa",
 }
 
 
@@ -291,6 +324,8 @@ def prompt_requests_execution(prompt: str) -> bool:
     if not normalized or prompt_is_smalltalk(normalized):
         return False
     if prompt_looks_like_command(normalized):
+        return True
+    if prompt_is_visual_shortcut(normalized):
         return True
     if any(token in normalized for token in EXECUTION_HINTS):
         return True
@@ -375,5 +410,50 @@ def extract_direct_browser_target(prompt: str) -> str | None:
     for pattern in DIRECT_BROWSER_PATTERNS:
         match = pattern.search(raw)
         if match:
-            return BROWSER_TARGET_ALIASES.get(match.group(3).strip().lower())
+            return BROWSER_TARGET_ALIASES.get(match.group(2).strip().lower())
+    return None
+
+
+def extract_direct_app_target(prompt: str) -> str | None:
+    raw = (prompt or "").strip()
+    if not raw:
+        return None
+    if any(pattern.search(raw) for pattern in GENERIC_APP_REQUEST_PATTERNS):
+        return "__launcher__"
+    if "?" in raw:
+        return None
+    for pattern in DIRECT_APP_PATTERNS:
+        match = pattern.match(raw)
+        if not match:
+            continue
+        target = " ".join(match.group(1).strip().lower().split())
+        first_word, _, remainder = target.partition(" ")
+        if first_word in APP_FILLER_PREFIXES and remainder:
+            target = remainder.strip()
+        for suffix in APP_FILLER_SUFFIXES:
+            if target.endswith(suffix):
+                target = target[: -len(suffix)].strip()
+                break
+        target = target.strip(" .,:;!\"'")
+        if not target:
+            return "__launcher__"
+        if target in BROWSER_TARGET_ALIASES:
+            return None
+        if target in GENERIC_APP_TAILS:
+            return "__launcher__"
+        if target.startswith(("algum ", "alguma ", "qualquer ")):
+            return "__launcher__"
+        return target
+    return None
+
+
+def extract_direct_visual_shortcut(prompt: str) -> tuple[str, str] | None:
+    browser_target = extract_direct_browser_target(prompt)
+    if browser_target:
+        return ("abrir_app", browser_target)
+    app_target = extract_direct_app_target(prompt)
+    if app_target == "__launcher__":
+        return ("atalho_teclado", "win")
+    if app_target:
+        return ("abrir_app", app_target)
     return None

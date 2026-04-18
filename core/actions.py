@@ -107,11 +107,11 @@ class AcoesAgente(ToolRegistry):
         )
         self.register(
             name="controle_periferico",
-            description="Controla mouse, teclado, browser/app e captura de tela. Acoes: clicar, digitar, mover_mouse, screenshot, posicao_cursor, abrir_app.",
+            description="Controla mouse, teclado, browser/app e captura de tela. Acoes: clicar, digitar, mover_mouse, screenshot, posicao_cursor, abrir_app, atalho_teclado.",
             parameters={
                 "type": "object",
                 "properties": {
-                    "acao": {"type": "string", "enum": ["clicar", "digitar", "mover_mouse", "screenshot", "posicao_cursor", "abrir_app"]},
+                    "acao": {"type": "string", "enum": ["clicar", "digitar", "mover_mouse", "screenshot", "posicao_cursor", "abrir_app", "atalho_teclado"]},
                     "x": {"type": "integer"},
                     "y": {"type": "integer"},
                     "texto": {"type": "string"},
@@ -655,6 +655,12 @@ class AcoesAgente(ToolRegistry):
         if acao == "digitar":
             runtime.type_text(texto or "")
             return self._json({"ok": True, "action": "digitar", "text_len": len(texto or "")})
+        if acao == "atalho_teclado":
+            target = (texto or "").strip()
+            if not target:
+                return self._json({"ok": False, "erro": "texto e obrigatorio para atalho_teclado"})
+            runtime.hotkey(target)
+            return self._json({"ok": True, "action": "atalho_teclado", "keys": target})
         if acao == "mover_mouse":
             if x is None or y is None:
                 return self._json({"ok": False, "erro": "x e y sao obrigatorios"})

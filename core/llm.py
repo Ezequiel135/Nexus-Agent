@@ -5,6 +5,7 @@ import hashlib
 import json
 import threading
 import time
+import warnings
 from types import SimpleNamespace
 from typing import Any
 
@@ -31,9 +32,19 @@ SYSTEM_PROMPT = (
     "Nao prefixe comandos com sudo manualmente; use execucao privilegiada apenas se a sessao sudo/root estiver ativa. "
     "Se o runtime estiver sem LLM remoto, ofereca modo offline local, comandos slash e instrucoes de configuracao. "
     "Se a tarefa envolver tela, mouse, teclado ou browser, use as ferramentas visuais. "
+    "Se o usuario pedir para abrir app, browser, menu ou janela, priorize executar a acao visual em vez de responder com explicacao. "
+    "So faca pergunta de follow-up quando o alvo realmente estiver ausente e nao houver fallback visual razoavel. "
     "Se a tarefa pedir contexto externo vindo de um servidor MCP, use a ferramenta consultar_mcp. "
     "Se a tarefa envolver notebooks Jupyter, use a ferramenta gerenciar_notebooks. "
     "Se um comando do sistema nao estiver claro ou faltar contexto externo, use inspecionar_sistema e consultar_web antes de improvisar."
+)
+
+OPERATIONAL_JSON_PROMPT = (
+    "Modo atual: execucao operacional. "
+    "Quando a tarefa pedir acao real, prefira tool calls. "
+    "Se o provider nao suportar tool calls ou se precisar responder em texto, devolva apenas JSON executavel, sem explicacoes extras, markdown ou linguagem natural. "
+    'Formatos aceitos: {"tool":"bash","command":"..."} ou {"tool":"controle_periferico","acao":"abrir_app","texto":"..."}; listas desses objetos tambem sao validas. '
+    "Nao invente chaves fora desse contrato quando o objetivo for execucao."
 )
 
 PLANNER_PROMPT = (
@@ -63,6 +74,12 @@ LLM_RETRY_ERROR_MARKERS = (
 )
 
 _CACHE_LOCK = threading.Lock()
+
+warnings.filterwarnings(
+    "ignore",
+    message=r".*Pydantic serializer warnings.*",
+    category=UserWarning,
+)
 
 
 def runtime_prompt(config: NexusConfig) -> str:
@@ -101,6 +118,8 @@ def system_prompt(
     parts = [SYSTEM_PROMPT]
     if conversational:
         parts.append("Modo atual: conversa direta. Evite tool calls e responda sem planejamento longo.")
+    elif latest_user_prompt and prompt_requests_execution(latest_user_prompt):
+        parts.append(OPERATIONAL_JSON_PROMPT)
     if latest_user_prompt:
         parts.append(language_instruction(config, latest_user_prompt))
     if extra:

@@ -10,7 +10,13 @@ from unittest.mock import patch
 
 from core.actions import AcoesAgente
 from core.config import NexusPaths, build_initial_config, make_account, make_agent
-from core.execution import apply_execution_profile, extract_direct_browser_target, should_preview_plan
+from core.execution import (
+    apply_execution_profile,
+    extract_direct_app_target,
+    extract_direct_browser_target,
+    extract_direct_visual_shortcut,
+    should_preview_plan,
+)
 from core.llm import LiteLLMBridge
 from core.privilege import PrivilegeSessionManager
 from core.safeguards import command_assessment
@@ -151,8 +157,19 @@ class SecurityRuntimeTests(unittest.TestCase):
 
     def test_direct_browser_prompt_extracts_chrome_alias(self) -> None:
         self.assertEqual(extract_direct_browser_target("abre o chrome"), "chrome")
+        self.assertEqual(extract_direct_browser_target("oi abri meu chrome"), "chrome")
         self.assertEqual(extract_direct_browser_target("open firefox"), "firefox")
         self.assertIsNone(extract_direct_browser_target("me explica o chrome"))
+
+    def test_direct_app_prompt_extracts_named_app_and_launcher_fallback(self) -> None:
+        self.assertEqual(extract_direct_app_target("abre o spotify"), "spotify")
+        self.assertEqual(extract_direct_app_target("abrir vscode no meu pc"), "vscode")
+        self.assertEqual(extract_direct_app_target("abri algum app do meu pc"), "__launcher__")
+        self.assertIsNone(extract_direct_app_target("me explica o spotify"))
+
+    def test_direct_visual_shortcut_uses_launcher_for_generic_app_request(self) -> None:
+        self.assertEqual(extract_direct_visual_shortcut("abre o chrome"), ("abrir_app", "chrome"))
+        self.assertEqual(extract_direct_visual_shortcut("abri algum app do meu pc"), ("atalho_teclado", "win"))
 
     def test_open_local_target_uses_browser_launcher(self) -> None:
         config = make_config()
@@ -173,6 +190,24 @@ class SecurityRuntimeTests(unittest.TestCase):
 
         self.assertEqual(result, "launched:chrome")
         popen_mock.assert_called()
+
+    def test_keyboard_shortcut_action_uses_runtime_hotkey(self) -> None:
+        config = make_config()
+        actions = AcoesAgente(config)
+        fake_runtime = SimpleNamespace(
+            hotkey=lambda _keys: True,
+            click=lambda **_kwargs: None,
+            type_text=lambda _text: None,
+            move_to=lambda _x, _y: None,
+            screen_image=lambda: None,
+            mouse_position=lambda: (0, 0),
+        )
+
+        with patch.dict(sys.modules, {"pc_remote_agent.runtime": fake_runtime}):
+            payload = json.loads(actions.controle_periferico("atalho_teclado", texto="win"))
+
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["keys"], "win")
 
 
 if __name__ == "__main__":
