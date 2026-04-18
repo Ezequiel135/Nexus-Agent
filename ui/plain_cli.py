@@ -45,7 +45,7 @@ except ImportError:
             return "\n".join(lines)
 
 from core.actions import CancelledExecution
-from core.assistant_actions import extract_assistant_command, normalize_assistant_answer, parse_assistant_actions
+from core.assistant_actions import normalize_assistant_answer
 from core.config import NexusPaths, normalize_response_language, save_config
 from core.execution import (
     apply_execution_profile,
@@ -63,6 +63,7 @@ from core.state import ActivityMonitor
 from core.transcript import background_interaction, bullet, format_activity_log, transcript_event, worked_banner
 from core.update_check import DEFAULT_UPDATE_COMMAND, UpdateInfo, check_for_update, installed_repo_url
 from core.version import APP_VERSION
+from ui.interaction import ExecutedActionEvent, collect_assistant_action_events, format_terminal_event, format_visual_event, visual_shortcut_status
 
 
 def format_session_summary(config) -> str:
@@ -254,86 +255,53 @@ class PlainNexusCLI:
         self._finish_task_log("Execucao direta concluida." if executed else "Resposta recebida sem execucao confirmada.")
 
     def _execute_assistant_actions(self, answer: str) -> bool:
-        actions = parse_assistant_actions(answer)
-        if not actions:
-            extracted_command = extract_assistant_command(answer)
-            if extracted_command:
-                self._run_direct_command(extracted_command)
-                return True
-            return False
-        executed = False
-        for item in actions:
-            if item["kind"] == "command":
-                self._run_direct_command(str(item["command"]))
-                executed = True
-                continue
-            if item["kind"] == "visual":
-                payload = json.loads(
-                    self.bridge.actions.controle_periferico(
-                        str(item["action"]),
-                        x=item.get("x"),
-                        y=item.get("y"),
-                        texto=item.get("target"),
-                    )
+        events = collect_assistant_action_events(
+            answer,
+            run_command=self._run_command_payload,
+            run_visual=self._run_visual_payload,
+        )
+        for event in events:
+            if event.kind == "command":
+                border_style = "green" if event.payload.get("ok") else "red"
+                self.console.print(
+                    Panel.fit(format_terminal_event(event, markdown=False), title="Terminal", border_style=border_style)
                 )
-                border_style = "green" if payload.get("ok") else "red"
-                body_lines = [f"acao: {item['action']}"]
-                if item.get("target"):
-                    body_lines.append(f"target: {item['target']}")
-                if payload.get("opened"):
-                    body_lines.append(f"resultado: {payload['opened']}")
-                if payload.get("keys"):
-                    body_lines.append(f"teclas: {payload['keys']}")
-                if payload.get("erro"):
-                    body_lines.append(f"erro: {payload['erro']}")
-                self.console.print(Panel.fit("\n".join(body_lines), title="Visual", border_style=border_style))
-                executed = True
-        return executed
+            elif event.kind == "visual":
+                border_style = "green" if event.payload.get("ok") else "red"
+                self.console.print(
+                    Panel.fit(format_visual_event(event, markdown=False), title="Visual", border_style=border_style)
+                )
+        return bool(events)
+
+    def _run_command_payload(self, command: str) -> dict[str, object]:
+        self.cancel_event.clear()
+        return json.loads(self.bridge.actions.executar_comando(command))
+
+    def _run_visual_payload(
+        self,
+        action: str,
+        target: str | None,
+        x: int | None = None,
+        y: int | None = None,
+    ) -> dict[str, object]:
+        self.cancel_event.clear()
+        return json.loads(self.bridge.actions.controle_periferico(action, x=x, y=y, texto=target))
 
     def _run_direct_command(self, command: str) -> None:
-        self.cancel_event.clear()
-        payload = json.loads(self.bridge.actions.executar_comando(command))
-        title = "Terminal"
+        payload = self._run_command_payload(command)
+        event = ExecutedActionEvent(kind="command", command=command, payload=payload)
         border_style = "green" if payload.get("ok") else "red"
-        body_lines = [f"comando: {command}"]
-        if payload.get("dry_run"):
-            body_lines.append("modo: dry-run")
-        if payload.get("stdout"):
-            body_lines.append("")
-            body_lines.append("[stdout]")
-            body_lines.append(str(payload["stdout"]))
-        if payload.get("stderr"):
-            body_lines.append("")
-            body_lines.append("[stderr]")
-            body_lines.append(str(payload["stderr"]))
-        if payload.get("erro"):
-            body_lines.append("")
-            body_lines.append(f"erro: {payload['erro']}")
-        if payload.get("returncode") is not None:
-            body_lines.append("")
-            body_lines.append(f"exit={payload['returncode']}")
-        self.console.print(Panel.fit("\n".join(body_lines), title=title, border_style=border_style))
+        self.console.print(Panel.fit(format_terminal_event(event, markdown=False), title="Terminal", border_style=border_style))
         self._finish_task_log("Comando de terminal concluido." if payload.get("ok") else "Comando de terminal finalizado com erro.")
 
     def _visual_shortcut_status(self, action: str, target: str) -> str:
-        if action == "atalho_teclado" and target == "win":
-            return "Vou abrir o menu de aplicativos direto no host."
-        if action == "fechar_app":
-            return f"Vou fechar {target} direto no host."
-        return f"Vou abrir {target} direto no host."
+        return visual_shortcut_status(action, target)
 
     def _run_direct_visual_action(self, action: str, target: str) -> None:
-        self.cancel_event.clear()
-        payload = json.loads(self.bridge.actions.controle_periferico(action, texto=target))
+        payload = self._run_visual_payload(action, target)
         border_style = "green" if payload.get("ok") else "red"
-        body_lines = [f"acao: {action}", f"target: {target}"]
-        if payload.get("opened"):
-            body_lines.append(f"resultado: {payload['opened']}")
-        if payload.get("keys"):
-            body_lines.append(f"teclas: {payload['keys']}")
-        if payload.get("erro"):
-            body_lines.append(f"erro: {payload['erro']}")
-        self.console.print(Panel.fit("\n".join(body_lines), title="Visual", border_style=border_style))
+        event = ExecutedActionEvent(kind="visual", action=action, target=target, payload=payload)
+        self.console.print(Panel.fit(format_visual_event(event, markdown=False), title="Visual", border_style=border_style))
         self._finish_task_log("Acao visual concluida." if payload.get("ok") else "Acao visual finalizada com erro.")
 
     def _approve_pending_plan(self) -> None:

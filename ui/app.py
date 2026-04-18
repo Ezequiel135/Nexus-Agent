@@ -20,7 +20,7 @@ from textual.containers import Container, Horizontal, Vertical, VerticalScroll
 from textual.widgets import Button, Footer, Input, RichLog, Static
 
 from core.actions import AcoesAgente, CancelledExecution
-from core.assistant_actions import extract_assistant_command, normalize_assistant_answer, parse_assistant_actions
+from core.assistant_actions import normalize_assistant_answer
 from core.config import (
     KNOWN_PROVIDERS,
     NexusConfig,
@@ -52,6 +52,7 @@ from core.safeguards import blocked_examples, blocked_reasons
 from core.transcript import background_interaction, bullet, format_activity_log, transcript_event, worked_banner
 from core.update_check import DEFAULT_UPDATE_COMMAND, UpdateInfo, check_for_update, installed_repo_url
 from core.version import APP_VERSION
+from ui.interaction import ExecutedActionEvent, collect_assistant_action_events, format_terminal_event, format_visual_event, visual_shortcut_status
 
 
 def _cpu_and_ram() -> str:
@@ -891,11 +892,7 @@ class NexusApp(App[None]):
         return should_preview_plan(self.bridge.config, prompt)
 
     def _visual_shortcut_status(self, action: str, target: str) -> str:
-        if action == "atalho_teclado" and target == "win":
-            return "Vou abrir o menu de aplicativos direto no host."
-        if action == "fechar_app":
-            return f"Vou fechar {target} direto no host."
-        return f"Vou abrir {target} direto no host."
+        return visual_shortcut_status(action, target)
 
     def action_mission_mode(self) -> None:
         self.bridge.config.plan_before_execute = not self.bridge.config.plan_before_execute
@@ -1221,88 +1218,37 @@ class NexusApp(App[None]):
             self.call_from_thread(self._focus_prompt)
 
     def _execute_assistant_actions(self, answer: str) -> bool:
-        actions = parse_assistant_actions(answer)
-        if not actions:
-            extracted_command = extract_assistant_command(answer)
-            if not extracted_command:
-                return False
-            payload = json.loads(self.bridge.actions.executar_comando(extracted_command))
-            lines = [f"**Terminal:** `{extracted_command}`"]
-            if payload.get("stdout"):
-                lines.append("```text")
-                lines.append(str(payload["stdout"]))
-                lines.append("```")
-            if payload.get("stderr"):
-                lines.append("```text")
-                lines.append(str(payload["stderr"]))
-                lines.append("```")
-            if payload.get("erro"):
-                lines.append(f"**Erro:** {payload['erro']}")
-            if payload.get("returncode") is not None:
-                lines.append(f"**Exit:** `{payload['returncode']}`")
-            self.call_from_thread(self._write_chat, "\n".join(lines))
-            return True
-        executed = False
-        for item in actions:
-            if item["kind"] == "command":
-                payload = json.loads(self.bridge.actions.executar_comando(str(item["command"])))
-                lines = [f"**Terminal:** `{item['command']}`"]
-                if payload.get("stdout"):
-                    lines.append("```text")
-                    lines.append(str(payload["stdout"]))
-                    lines.append("```")
-                if payload.get("stderr"):
-                    lines.append("```text")
-                    lines.append(str(payload["stderr"]))
-                    lines.append("```")
-                if payload.get("erro"):
-                    lines.append(f"**Erro:** {payload['erro']}")
-                if payload.get("returncode") is not None:
-                    lines.append(f"**Exit:** `{payload['returncode']}`")
-                self.call_from_thread(self._write_chat, "\n".join(lines))
-                executed = True
-                continue
-            if item["kind"] == "visual":
-                payload = json.loads(
-                    self.bridge.actions.controle_periferico(
-                        str(item["action"]),
-                        x=item.get("x"),
-                        y=item.get("y"),
-                        texto=item.get("target"),
-                    )
-                )
-                lines = [f"**Visual:** `{item['action']}`"]
-                if item.get("target"):
-                    lines[0] += f" `{item['target']}`"
-                if payload.get("opened"):
-                    lines.append(f"**Resultado:** `{payload['opened']}`")
-                if payload.get("keys"):
-                    lines.append(f"**Teclas:** `{payload['keys']}`")
-                if payload.get("erro"):
-                    lines.append(f"**Erro:** {payload['erro']}")
-                self.call_from_thread(self._write_chat, "\n".join(lines))
-                executed = True
-        return executed
+        events = collect_assistant_action_events(
+            answer,
+            run_command=self._run_command_payload,
+            run_visual=self._run_visual_payload,
+        )
+        for event in events:
+            if event.kind == "command":
+                self.call_from_thread(self._write_chat, format_terminal_event(event, markdown=True))
+            elif event.kind == "visual":
+                self.call_from_thread(self._write_chat, format_visual_event(event, markdown=True))
+        return bool(events)
+
+    def _run_command_payload(self, command: str) -> dict[str, object]:
+        return json.loads(self.bridge.actions.executar_comando(command))
+
+    def _run_visual_payload(
+        self,
+        action: str,
+        target: str | None,
+        x: int | None = None,
+        y: int | None = None,
+    ) -> dict[str, object]:
+        return json.loads(self.bridge.actions.controle_periferico(action, x=x, y=y, texto=target))
 
     def _process_direct_command(self, prompt: str) -> None:
         try:
             log_event("PROMPT", prompt)
             self._set_mission_panel(f"Executando comando direto: {prompt}")
-            payload = json.loads(self.bridge.actions.executar_comando(prompt))
-            lines = [f"**Terminal:** `{prompt}`"]
-            if payload.get("stdout"):
-                lines.append("```text")
-                lines.append(str(payload["stdout"]))
-                lines.append("```")
-            if payload.get("stderr"):
-                lines.append("```text")
-                lines.append(str(payload["stderr"]))
-                lines.append("```")
-            if payload.get("erro"):
-                lines.append(f"**Erro:** {payload['erro']}")
-            if payload.get("returncode") is not None:
-                lines.append(f"**Exit:** `{payload['returncode']}`")
-            self.call_from_thread(self._write_chat, "\n".join(lines))
+            payload = self._run_command_payload(prompt)
+            event = ExecutedActionEvent(kind="command", command=prompt, payload=payload)
+            self.call_from_thread(self._write_chat, format_terminal_event(event, markdown=True))
             if payload.get("ok"):
                 self.call_from_thread(self._set_light, "LUZ VERDE — comando de terminal concluido")
                 self.call_from_thread(self._set_mission_panel, "Comando de terminal concluido.")
@@ -1328,15 +1274,9 @@ class NexusApp(App[None]):
     def _process_direct_visual_action(self, action: str, target: str) -> None:
         try:
             self._set_mission_panel(f"Executando acao visual: {action} {target}")
-            payload = json.loads(self.bridge.actions.controle_periferico(action, texto=target))
-            lines = [f"**Visual:** `{action}` `{target}`"]
-            if payload.get("opened"):
-                lines.append(f"**Resultado:** `{payload['opened']}`")
-            if payload.get("keys"):
-                lines.append(f"**Teclas:** `{payload['keys']}`")
-            if payload.get("erro"):
-                lines.append(f"**Erro:** {payload['erro']}")
-            self.call_from_thread(self._write_chat, "\n".join(lines))
+            payload = self._run_visual_payload(action, target)
+            event = ExecutedActionEvent(kind="visual", action=action, target=target, payload=payload)
+            self.call_from_thread(self._write_chat, format_visual_event(event, markdown=True))
             if payload.get("ok"):
                 self.call_from_thread(self._set_light, "LUZ VERDE — acao visual concluida")
                 self.call_from_thread(self._set_mission_panel, "Acao visual concluida.")

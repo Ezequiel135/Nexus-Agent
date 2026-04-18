@@ -10,6 +10,19 @@ O formato segue a ideia de:
 
 ## [Unreleased]
 
+## [26.4.7] - 2026-04-18
+
+### Added
+- Novo modulo `ui/interaction.py` para centralizar parsing de resposta operacional, execucao de fallback da IA e formatacao de saida entre as UIs plain e visual.
+- Testes cobrindo o modulo compartilhado de interacao e a preservacao do comportamento esperado.
+
+### Changed
+- `ui/app.py` e `ui/plain_cli.py` agora usam a mesma camada compartilhada para comandos textuais curtos, acoes visuais e mensagens de status de atalhos.
+- A biblioteca interna do app ficou mais organizada no fluxo de interacao, com menos duplicacao direta entre as UIs.
+
+### Fixed
+- Reduzido o risco de divergencia entre UI visual e CLI plain ao executar respostas da IA, comandos diretos e acoes visuais.
+
 ## [26.4.6] - 2026-04-18
 
 ### Added
