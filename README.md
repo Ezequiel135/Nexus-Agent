@@ -13,7 +13,7 @@ O **NEXUS AGENT** roda no terminal, entende instrucoes em linguagem natural e ex
 ## Recursos
 
 - Execucao de comandos locais com controles de seguranca
-- Execucao direta de comandos shell digitados no prompt, como `gh auth status` e `git status`
+- Execucao direta de comandos shell digitados no prompt, como `gh auth status`, `gh pr status`, `gh repo view` e `git status`
 - Abertura direta de navegador/app para pedidos simples como `abre o chrome`
 - Manipulacao de arquivos e memoria local
 - Interface visual com Textual e modo plain para terminal puro
@@ -149,12 +149,14 @@ nexus start --plain --task "organize meus arquivos de download"
 No prompt do Nexus, voce pode mandar:
 
 - `gh auth status`
+- `gh repo view Ezequiel135/Nexus-Agent`
+- `gh pr status`
 - `git status`
 - `abre o chrome`
 - `open firefox`
 - `abre o edge`
 
-Comandos shell puros sao executados direto no terminal quando passam nas regras de seguranca. Pedidos simples de abrir navegador/app tentam focar a janela existente e, se necessario, lancam o app de verdade no host.
+Comandos shell puros sao executados direto no terminal quando passam nas regras de seguranca. Consultas read-only do GitHub CLI como status, PRs, issues, runs e repo view tambem entram nesse fluxo direto. Pedidos simples de abrir navegador/app tentam focar a janela existente e, se necessario, lancam o app de verdade no host.
 
 ### Comandos principais
 

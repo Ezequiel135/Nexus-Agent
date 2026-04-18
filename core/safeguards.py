@@ -156,6 +156,24 @@ READ_ONLY_PRIVILEGED_SUBCOMMANDS = {
     "xdg-settings": {"get"},
 }
 
+READ_ONLY_SUBCOMMAND_PATHS = {
+    "gh": {
+        ("auth", "status"),
+        ("issue", "list"),
+        ("issue", "status"),
+        ("issue", "view"),
+        ("pr", "checks"),
+        ("pr", "diff"),
+        ("pr", "list"),
+        ("pr", "status"),
+        ("pr", "view"),
+        ("repo", "view"),
+        ("run", "list"),
+        ("run", "view"),
+        ("status",),
+    },
+}
+
 CRITICAL_PATH_PREFIXES = (
     "/",
     "/bin",
@@ -257,6 +275,17 @@ def parse_shell_command(command: str) -> list[str]:
     return argv
 
 
+def _first_non_flag_tokens(argv: list[str], limit: int = 2) -> tuple[str, ...]:
+    tokens: list[str] = []
+    for token in argv[1:]:
+        if token.startswith("-"):
+            continue
+        tokens.append(token)
+        if len(tokens) >= limit:
+            break
+    return tuple(tokens)
+
+
 def command_assessment(command: str, extra_safe_executables: set[str] | None = None) -> CommandAssessment:
     raw = (command or "").strip()
     lowered = raw.lower()
@@ -293,7 +322,8 @@ def command_assessment(command: str, extra_safe_executables: set[str] | None = N
             return CommandAssessment(False, "red", "git push via agente shell foi bloqueado; use fluxo explicito de publicacao.", executable=executable, argv=argv, modifies_state=True)
 
     if executable == "gh":
-        if len(argv) >= 3 and argv[1] == "auth" and argv[2] == "status":
+        tokens = _first_non_flag_tokens(argv, limit=2)
+        if tokens in READ_ONLY_SUBCOMMAND_PATHS.get("gh", set()):
             modifies_state = False
 
     if executable in {"python", "python3"}:

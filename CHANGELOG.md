@@ -10,6 +10,17 @@ O formato segue a ideia de:
 
 ## [Unreleased]
 
+## [26.4.5] - 2026-04-18
+
+### Added
+- Testes cobrindo comandos read-only do GitHub CLI, incluindo `gh repo view`, `gh pr status`, `gh pr checks`, `gh issue list` e `gh run list`.
+
+### Changed
+- O classificador de seguranca agora reconhece mais subcomandos read-only do `gh` e permite diagnostico do repositório/projeto sem pedir confirmacao desnecessaria.
+
+### Fixed
+- Corrigido o caso em que consultas seguras do GitHub CLI ainda caiam em `Luz Amarela`, atrasando fluxos como inspecionar PRs, issues, runs e status do repositório.
+
 ## [26.4.4] - 2026-04-16
 
 ### Added

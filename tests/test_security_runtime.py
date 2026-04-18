@@ -143,6 +143,27 @@ class SecurityRuntimeTests(unittest.TestCase):
         self.assertEqual(assessment.level, "green")
         self.assertFalse(assessment.needs_confirmation)
 
+    def test_gh_repo_and_pr_read_only_commands_are_allowed(self) -> None:
+        for command in (
+            "gh repo view Ezequiel135/Nexus-Agent",
+            "gh pr status",
+            "gh pr checks 12",
+            "gh issue list",
+            "gh run list",
+        ):
+            with self.subTest(command=command):
+                assessment = command_assessment(command)
+                self.assertTrue(assessment.allowed)
+                self.assertEqual(assessment.level, "green")
+                self.assertFalse(assessment.needs_confirmation)
+
+    def test_gh_mutating_command_still_requires_confirmation(self) -> None:
+        assessment = command_assessment("gh repo clone Ezequiel135/Nexus-Agent")
+
+        self.assertTrue(assessment.allowed)
+        self.assertEqual(assessment.level, "yellow")
+        self.assertTrue(assessment.needs_confirmation)
+
     def test_command_output_is_streamed_while_process_runs(self) -> None:
         config = make_config()
         actions = AcoesAgente(config)
