@@ -20,7 +20,7 @@ from textual.containers import Container, Horizontal, Vertical, VerticalScroll
 from textual.widgets import Button, Footer, Input, RichLog, Static
 
 from core.actions import AcoesAgente, CancelledExecution
-from core.assistant_actions import parse_assistant_actions
+from core.assistant_actions import extract_assistant_command, normalize_assistant_answer, parse_assistant_actions
 from core.config import (
     KNOWN_PROVIDERS,
     NexusConfig,
@@ -893,6 +893,8 @@ class NexusApp(App[None]):
     def _visual_shortcut_status(self, action: str, target: str) -> str:
         if action == "atalho_teclado" and target == "win":
             return "Vou abrir o menu de aplicativos direto no host."
+        if action == "fechar_app":
+            return f"Vou fechar {target} direto no host."
         return f"Vou abrir {target} direto no host."
 
     def action_mission_mode(self) -> None:
@@ -1200,10 +1202,10 @@ class NexusApp(App[None]):
                 fallback_executed = self._execute_assistant_actions(answer)
             self.conversation.append({"role": "assistant", "content": answer})
             self._save_history()
-            final_text = answer if not fallback_executed else "Acao executada a partir do comando estruturado devolvido pela IA."
+            final_text, executed = normalize_assistant_answer(answer, prompt, tool_logs, fallback_executed)
             self.call_from_thread(self._write_chat, final_text)
-            self.call_from_thread(self._set_mission_panel, "Execucao direta concluida." if (tool_logs or fallback_executed) else "Resposta recebida sem execucao confirmada.")
-            self.call_from_thread(self._finish_task_log, "Execucao direta concluida." if (tool_logs or fallback_executed) else "Resposta recebida sem execucao confirmada.")
+            self.call_from_thread(self._set_mission_panel, "Execucao direta concluida." if executed else "Resposta recebida sem execucao confirmada.")
+            self.call_from_thread(self._finish_task_log, "Execucao direta concluida." if executed else "Resposta recebida sem execucao confirmada.")
         except CancelledExecution as exc:
             self.call_from_thread(self._write_chat, f"**CANCELADO:** {exc}")
             self.call_from_thread(self._write_log, f"[WARN] {exc}")
@@ -1221,7 +1223,25 @@ class NexusApp(App[None]):
     def _execute_assistant_actions(self, answer: str) -> bool:
         actions = parse_assistant_actions(answer)
         if not actions:
-            return False
+            extracted_command = extract_assistant_command(answer)
+            if not extracted_command:
+                return False
+            payload = json.loads(self.bridge.actions.executar_comando(extracted_command))
+            lines = [f"**Terminal:** `{extracted_command}`"]
+            if payload.get("stdout"):
+                lines.append("```text")
+                lines.append(str(payload["stdout"]))
+                lines.append("```")
+            if payload.get("stderr"):
+                lines.append("```text")
+                lines.append(str(payload["stderr"]))
+                lines.append("```")
+            if payload.get("erro"):
+                lines.append(f"**Erro:** {payload['erro']}")
+            if payload.get("returncode") is not None:
+                lines.append(f"**Exit:** `{payload['returncode']}`")
+            self.call_from_thread(self._write_chat, "\n".join(lines))
+            return True
         executed = False
         for item in actions:
             if item["kind"] == "command":

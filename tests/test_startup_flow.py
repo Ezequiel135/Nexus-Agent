@@ -4,8 +4,7 @@ from types import SimpleNamespace
 import unittest
 
 import main
-from core.assistant_actions import parse_assistant_actions
-from ui.plain_cli import _normalize_assistant_answer
+from core.assistant_actions import extract_assistant_command, normalize_assistant_answer, parse_assistant_actions
 from ui.plain_cli import format_onboarding_message, format_session_summary
 
 
@@ -45,10 +44,31 @@ class StartupFlowTests(unittest.TestCase):
         self.assertIn("nexus parallel run", message)
 
     def test_normalize_assistant_answer_flags_raw_tool_json_without_execution(self) -> None:
-        text, executed = _normalize_assistant_answer('[{"tool":"bash","command":"google-chrome &"}]', [])
+        text, executed = normalize_assistant_answer('[{"tool":"bash","command":"google-chrome &"}]', "abre o chrome", [])
 
         self.assertFalse(executed)
         self.assertIn("execucao automatica nao foi concluida", text)
+
+    def test_normalize_assistant_answer_hides_long_operational_text_without_execution(self) -> None:
+        text, executed = normalize_assistant_answer(
+            "Okay, the user just said to close Chrome. I need to think step by step before deciding what command to run.",
+            "fecha o chrome que esta aberto",
+            [],
+        )
+
+        self.assertFalse(executed)
+        self.assertIn("sem executar", text)
+
+    def test_extract_assistant_command_accepts_single_safe_command_line(self) -> None:
+        self.assertEqual(extract_assistant_command("gh auth status"), "gh auth status")
+        self.assertEqual(extract_assistant_command("```bash\ngit status\n```"), "git status")
+
+    def test_extract_assistant_command_rejects_long_reasoning_text(self) -> None:
+        self.assertIsNone(
+            extract_assistant_command(
+                "Okay, the user asked me to check auth. I will think first and maybe use gh auth status after that."
+            )
+        )
 
     def test_parse_assistant_actions_supports_terminal_and_visual_formats(self) -> None:
         parsed = parse_assistant_actions(
@@ -62,3 +82,8 @@ class StartupFlowTests(unittest.TestCase):
                 {"kind": "visual", "action": "abrir_app", "target": "chrome"},
             ],
         )
+
+    def test_parse_assistant_actions_supports_close_app_visual_format(self) -> None:
+        parsed = parse_assistant_actions('{"tool":"controle_periferico","acao":"fechar_app","texto":"chrome"}')
+
+        self.assertEqual(parsed, [{"kind": "visual", "action": "fechar_app", "target": "chrome"}])

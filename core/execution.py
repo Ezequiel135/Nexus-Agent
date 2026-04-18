@@ -40,10 +40,13 @@ VISUAL_SHORTCUT_HINTS = {
     "click",
     "clicar",
     "digitar",
+    "fecha",
+    "fechar",
     "janela",
     "keyboard",
     "mouse",
     "open",
+    "close",
     "pesquisa",
     "programa",
     "screen",
@@ -228,8 +231,15 @@ DIRECT_BROWSER_PATTERNS = (
     re.compile(r"\b(abre|abrir|abra|abri|open|start|launch)\b(?:\s+\w+){0,4}?\s*\b(firefox)\b", re.IGNORECASE),
     re.compile(r"\b(abre|abrir|abra|abri|open|start|launch)\b(?:\s+\w+){0,4}?\s*\b(edge|microsoft\s+edge)\b", re.IGNORECASE),
 )
+DIRECT_CLOSE_BROWSER_PATTERNS = (
+    re.compile(r"\b(fecha|fechar|feche|close|quit|exit)\b(?:\s+\w+){0,6}?\s*\b(google\s+chrome|chrome)\b", re.IGNORECASE),
+    re.compile(r"\b(fecha|fechar|feche|close|quit|exit)\b(?:\s+\w+){0,6}?\s*\b(chromium)\b", re.IGNORECASE),
+    re.compile(r"\b(fecha|fechar|feche|close|quit|exit)\b(?:\s+\w+){0,6}?\s*\b(firefox)\b", re.IGNORECASE),
+    re.compile(r"\b(fecha|fechar|feche|close|quit|exit)\b(?:\s+\w+){0,6}?\s*\b(edge|microsoft\s+edge)\b", re.IGNORECASE),
+)
 DIRECT_APP_PATTERNS = (
     re.compile(r"^\s*(?:abre|abrir|abra|abri|open|start|launch)\s+(.+?)\s*$", re.IGNORECASE),
+    re.compile(r"^\s*(?:fecha|fechar|feche|close|quit|exit)\s+(.+?)\s*$", re.IGNORECASE),
 )
 BROWSER_TARGET_ALIASES = {
     "google chrome": "chrome",
@@ -250,6 +260,12 @@ APP_FILLER_SUFFIXES = (
     " aqui",
     " pra mim",
     " para mim",
+    " que esta aberto",
+    " que está aberto",
+    " que ta aberto",
+    " que tá aberto",
+    " aberto",
+    " aberta",
 )
 GENERIC_APP_TAILS = {
     "app",
@@ -414,6 +430,17 @@ def extract_direct_browser_target(prompt: str) -> str | None:
     return None
 
 
+def extract_direct_close_browser_target(prompt: str) -> str | None:
+    raw = (prompt or "").strip()
+    if not raw:
+        return None
+    for pattern in DIRECT_CLOSE_BROWSER_PATTERNS:
+        match = pattern.search(raw)
+        if match:
+            return BROWSER_TARGET_ALIASES.get(match.group(2).strip().lower())
+    return None
+
+
 def extract_direct_app_target(prompt: str) -> str | None:
     raw = (prompt or "").strip()
     if not raw:
@@ -448,6 +475,9 @@ def extract_direct_app_target(prompt: str) -> str | None:
 
 
 def extract_direct_visual_shortcut(prompt: str) -> tuple[str, str] | None:
+    close_browser_target = extract_direct_close_browser_target(prompt)
+    if close_browser_target:
+        return ("fechar_app", close_browser_target)
     browser_target = extract_direct_browser_target(prompt)
     if browser_target:
         return ("abrir_app", browser_target)
@@ -455,5 +485,8 @@ def extract_direct_visual_shortcut(prompt: str) -> tuple[str, str] | None:
     if app_target == "__launcher__":
         return ("atalho_teclado", "win")
     if app_target:
+        lowered = _lower_prompt(prompt)
+        if any(token in lowered.split() for token in {"fecha", "fechar", "feche", "close", "quit", "exit"}):
+            return ("fechar_app", app_target)
         return ("abrir_app", app_target)
     return None

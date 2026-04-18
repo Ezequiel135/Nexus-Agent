@@ -190,6 +190,7 @@ class SecurityRuntimeTests(unittest.TestCase):
 
     def test_direct_visual_shortcut_uses_launcher_for_generic_app_request(self) -> None:
         self.assertEqual(extract_direct_visual_shortcut("abre o chrome"), ("abrir_app", "chrome"))
+        self.assertEqual(extract_direct_visual_shortcut("fecha o chrome que esta aberto"), ("fechar_app", "chrome"))
         self.assertEqual(extract_direct_visual_shortcut("abri algum app do meu pc"), ("atalho_teclado", "win"))
 
     def test_open_local_target_uses_browser_launcher(self) -> None:
@@ -211,6 +212,16 @@ class SecurityRuntimeTests(unittest.TestCase):
 
         self.assertEqual(result, "launched:chrome")
         popen_mock.assert_called()
+
+    def test_close_local_target_uses_runtime_close_application(self) -> None:
+        config = make_config()
+        actions = AcoesAgente(config)
+        fake_runtime = SimpleNamespace(close_application=lambda target: target == "chrome")
+
+        with patch.dict(sys.modules, {"pc_remote_agent.runtime": fake_runtime}):
+            result = actions._close_local_target("chrome")
+
+        self.assertEqual(result, "closed:chrome")
 
     def test_keyboard_shortcut_action_uses_runtime_hotkey(self) -> None:
         config = make_config()

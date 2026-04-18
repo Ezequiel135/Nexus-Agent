@@ -10,6 +10,18 @@ O formato segue a ideia de:
 
 ## [Unreleased]
 
+## [26.4.6] - 2026-04-18
+
+### Added
+- Parser de fallback para executar comando shell simples quando a IA devolver apenas uma linha segura como `gh auth status` ou `git status`, mesmo sem JSON de tool-call.
+- Testes cobrindo extracao de comando textual puro e rejeicao de texto narrativo longo.
+
+### Changed
+- O plain CLI e a UI visual agora tentam executar automaticamente respostas de comando puro da IA antes de tratar a resposta como texto comum.
+
+### Fixed
+- Corrigido o caso em que a IA devolvia um comando curto valido, mas o Nexus apenas mostrava a resposta em vez de executar.
+
 ## [26.4.5] - 2026-04-18
 
 ### Added

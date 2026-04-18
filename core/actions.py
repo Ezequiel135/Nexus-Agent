@@ -107,11 +107,11 @@ class AcoesAgente(ToolRegistry):
         )
         self.register(
             name="controle_periferico",
-            description="Controla mouse, teclado, browser/app e captura de tela. Acoes: clicar, digitar, mover_mouse, screenshot, posicao_cursor, abrir_app, atalho_teclado.",
+            description="Controla mouse, teclado, browser/app e captura de tela. Acoes: clicar, digitar, mover_mouse, screenshot, posicao_cursor, abrir_app, fechar_app, atalho_teclado.",
             parameters={
                 "type": "object",
                 "properties": {
-                    "acao": {"type": "string", "enum": ["clicar", "digitar", "mover_mouse", "screenshot", "posicao_cursor", "abrir_app", "atalho_teclado"]},
+                    "acao": {"type": "string", "enum": ["clicar", "digitar", "mover_mouse", "screenshot", "posicao_cursor", "abrir_app", "fechar_app", "atalho_teclado"]},
                     "x": {"type": "integer"},
                     "y": {"type": "integer"},
                     "texto": {"type": "string"},
@@ -683,6 +683,15 @@ class AcoesAgente(ToolRegistry):
             except Exception as exc:
                 return self._json({"ok": False, "erro": str(exc), "target": target})
             return self._json({"ok": True, "action": "abrir_app", "target": target, "opened": opened})
+        if acao == "fechar_app":
+            target = (texto or "").strip()
+            if not target:
+                return self._json({"ok": False, "erro": "texto e obrigatorio para fechar_app"})
+            try:
+                closed = self._close_local_target(target)
+            except Exception as exc:
+                return self._json({"ok": False, "erro": str(exc), "target": target})
+            return self._json({"ok": True, "action": "fechar_app", "target": target, "opened": closed})
         raise ValueError(f"Acao periferica desconhecida: {acao}")
 
     def _open_local_target(self, target: str) -> str:
@@ -719,6 +728,16 @@ class AcoesAgente(ToolRegistry):
             return f"focused:{raw}"
         runtime.open_application(raw)
         return f"launched:{raw}"
+
+    def _close_local_target(self, target: str) -> str:
+        from pc_remote_agent import runtime
+
+        raw = (target or "").strip()
+        if not raw:
+            raise RuntimeError("Alvo vazio para fechar_app.")
+        if runtime.close_application(raw):
+            return f"closed:{raw.lower()}"
+        raise RuntimeError(f"Nao consegui fechar '{raw}' neste host.")
 
     def verificar_pixel(self, x: int, y: int) -> str:
         from pc_remote_agent import runtime

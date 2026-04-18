@@ -45,7 +45,7 @@ except ImportError:
             return "\n".join(lines)
 
 from core.actions import CancelledExecution
-from core.assistant_actions import parse_assistant_actions
+from core.assistant_actions import extract_assistant_command, normalize_assistant_answer, parse_assistant_actions
 from core.config import NexusPaths, normalize_response_language, save_config
 from core.execution import (
     apply_execution_profile,
@@ -63,20 +63,6 @@ from core.state import ActivityMonitor
 from core.transcript import background_interaction, bullet, format_activity_log, transcript_event, worked_banner
 from core.update_check import DEFAULT_UPDATE_COMMAND, UpdateInfo, check_for_update, installed_repo_url
 from core.version import APP_VERSION
-
-
-def _normalize_assistant_answer(answer: str, tool_logs: list[str], fallback_executed: bool = False) -> tuple[str, bool]:
-    if tool_logs:
-        return answer or "(sem resposta)", True
-    if fallback_executed:
-        return "Acao executada a partir do comando estruturado devolvido pela IA.", True
-    if parse_assistant_actions(answer):
-        return (
-            "O modelo devolveu um comando estruturado.\n"
-            "O CLI reconheceu esse formato, mas a execucao automatica nao foi concluida.",
-            False,
-        )
-    return answer or "(sem resposta)", True
 
 
 def format_session_summary(config) -> str:
@@ -255,7 +241,7 @@ class PlainNexusCLI:
         fallback_executed = False
         if not tool_logs:
             fallback_executed = self._execute_assistant_actions(answer)
-        normalized_answer, executed = _normalize_assistant_answer(answer, tool_logs, fallback_executed)
+        normalized_answer, executed = normalize_assistant_answer(answer, prompt, tool_logs, fallback_executed)
         self.conversation.append({"role": "assistant", "content": answer})
         self._save_history()
         self.console.print(
@@ -270,6 +256,10 @@ class PlainNexusCLI:
     def _execute_assistant_actions(self, answer: str) -> bool:
         actions = parse_assistant_actions(answer)
         if not actions:
+            extracted_command = extract_assistant_command(answer)
+            if extracted_command:
+                self._run_direct_command(extracted_command)
+                return True
             return False
         executed = False
         for item in actions:
@@ -328,6 +318,8 @@ class PlainNexusCLI:
     def _visual_shortcut_status(self, action: str, target: str) -> str:
         if action == "atalho_teclado" and target == "win":
             return "Vou abrir o menu de aplicativos direto no host."
+        if action == "fechar_app":
+            return f"Vou fechar {target} direto no host."
         return f"Vou abrir {target} direto no host."
 
     def _run_direct_visual_action(self, action: str, target: str) -> None:

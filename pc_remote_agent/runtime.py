@@ -71,6 +71,12 @@ BROWSER_COMMANDS = {
         "edge": [["open", "-a", "Microsoft Edge"]],
     },
 }
+BROWSER_PROCESS_NAMES = {
+    "chrome": ("google-chrome-stable", "google-chrome", "chrome"),
+    "chromium": ("chromium-browser", "chromium"),
+    "firefox": ("firefox",),
+    "edge": ("microsoft-edge", "microsoft-edge-stable", "msedge"),
+}
 BROWSER_ORDER = ("chrome", "chromium", "firefox", "edge")
 BLOCKED_BROWSER_VALUES = {"default", "system", "brave", "brave-browser", "brave.exe"}
 
@@ -341,6 +347,42 @@ def open_application(command_or_url):
         return True
     subprocess.Popen(command_or_url.split(), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return True
+
+
+def close_application(target):
+    raw = (target or "").strip()
+    normalized = _normalize_browser_name(raw)
+
+    if normalized in BROWSER_WINDOW_TITLES:
+        for candidate in BROWSER_WINDOW_TITLES.get(normalized, ()):
+            if focus_window(candidate):
+                if SYSTEM == "darwin":
+                    hotkey("command+q")
+                else:
+                    hotkey("alt+f4")
+                return True
+        for process_name in BROWSER_PROCESS_NAMES.get(normalized, ()):
+            if SYSTEM == "linux":
+                result = run_command(["pkill", "-f", process_name])
+                if result.returncode == 0:
+                    return True
+            elif SYSTEM == "darwin":
+                result = run_command(["pkill", "-x", process_name])
+                if result.returncode == 0:
+                    return True
+            elif SYSTEM == "windows":
+                image_name = process_name if process_name.lower().endswith(".exe") else f"{process_name}.exe"
+                result = run_command(["taskkill", "/IM", image_name, "/T"])
+                if result.returncode == 0:
+                    return True
+
+    if focus_window(raw):
+        if SYSTEM == "darwin":
+            hotkey("command+q")
+        else:
+            hotkey("alt+f4")
+        return True
+    return False
 
 
 def save_error_capture(prefix="visual_error"):
